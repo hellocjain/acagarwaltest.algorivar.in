@@ -186,19 +186,45 @@ def get_system_diagnostics() -> Dict[str, Any]:
     }
 
 
+def is_cloudflare_ip(ip: str) -> bool:
+    """Check if resolved IP belongs to known Cloudflare proxy ranges."""
+    try:
+        parts = [int(x) for x in ip.split(".")]
+        if len(parts) == 4:
+            if parts[0] == 104 and 16 <= parts[1] <= 31:
+                return True
+            if parts[0] == 172 and 64 <= parts[1] <= 71:
+                return True
+            if parts[0] == 108 and parts[1] == 162:
+                return True
+            if parts[0] == 162 and parts[1] == 158:
+                return True
+            if parts[0] == 198 and parts[1] == 41:
+                return True
+            if parts[0] == 197 and parts[1] == 234:
+                return True
+            if parts[0] == 188 and parts[1] == 114:
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def check_domain_dns(domain: str) -> Dict[str, Any]:
     """Check if domain resolves to this server's public IP."""
     if not domain:
-        return {"resolves": False, "ip": "", "matches_server": False}
+        return {"resolves": False, "ip": "", "matches_server": False, "is_cloudflare": False}
     pub_ip = get_public_ip()
     try:
         resolved_ip = socket.gethostbyname(domain)
-        matches = resolved_ip == pub_ip
+        is_cf = is_cloudflare_ip(resolved_ip)
+        matches = (resolved_ip == pub_ip) or is_cf
         return {
             "resolves": True,
             "ip": resolved_ip,
             "server_ip": pub_ip,
             "matches_server": matches,
+            "is_cloudflare": is_cf,
         }
     except Exception:
         return {
@@ -206,6 +232,7 @@ def check_domain_dns(domain: str) -> Dict[str, Any]:
             "ip": "",
             "server_ip": pub_ip,
             "matches_server": False,
+            "is_cloudflare": False,
         }
 
 
@@ -1017,9 +1044,12 @@ BROKER_OPTIONS_PLACEHOLDER
       try {
         const res = await fetch(`/api/check-dns?domain=${encodeURIComponent(domain)}&token=${securityToken}`);
         const data = await res.json();
-        if (data.resolves && data.matches_server) {
+        if (data.is_cloudflare) {
+          dnsStatus.className = 'text-xs mt-1.5 flex items-center text-amber-300';
+          dnsStatus.innerHTML = `<i class="fa-solid fa-cloud mr-1.5 text-amber-400"></i> Cloudflare Proxy (Orange Cloud) detected. <b>Important:</b> Switch to <b>DNS only</b> (Grey Cloud) in Cloudflare for Let's Encrypt SSL issuance.`;
+        } else if (data.resolves && data.matches_server) {
           dnsStatus.className = 'text-xs mt-1.5 flex items-center text-emerald-400';
-          dnsStatus.innerHTML = `<i class="fa-solid fa-circle-check mr-1.5"></i> DNS verified! Resolves to server IP (${data.ip}).`;
+          dnsStatus.innerHTML = `<i class="fa-solid fa-circle-check mr-1.5"></i> DNS verified! Resolves directly to server IP (${data.ip}).`;
         } else if (data.resolves && !data.matches_server) {
           dnsStatus.className = 'text-xs mt-1.5 flex items-center text-amber-400';
           dnsStatus.innerHTML = `<i class="fa-solid fa-triangle-exclamation mr-1.5"></i> Domain resolves to ${data.ip}, but your server IP is ${data.server_ip}.`;
