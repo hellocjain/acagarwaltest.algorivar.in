@@ -43,12 +43,13 @@ Order workflows from the REST API, hosted strategies, and Flow can use Analyzer 
 
 **Requires Python 3.12 or newer.**
 
-## Supported Brokers (36 plugins)
+## Supported Brokers (37 plugins)
 
 <details>
 <summary>View All Supported Brokers</summary>
 
 - 5paisa (Standard + XTS)
+- AC Agarwal
 - AliceBlue
 - AngelOne
 - Arrow
@@ -307,16 +308,21 @@ OpenAlgo is part of a larger open-source trading ecosystem:
 
 ## Installation
 
-### Minimum Requirements
-- **RAM**: 2GB (or 0.5GB + 2GB swap)
-- **Disk**: 1GB
-- **CPU**: 1 vCPU
-- **Python**: 3.12 or newer
-- **Node.js**: 20.20+, 22.22+, or 24.13+ (for frontend development)
+### 🚀 One-Click Web Installer for Ubuntu Server (Recommended)
 
-### Quick Start with UV
+Install and configure OpenAlgo on a fresh Ubuntu server via a modern web wizard:
 
-OpenAlgo uses the modern `uv` package manager for faster, more reliable installations:
+```bash
+curl -sSL https://raw.githubusercontent.com/marketcalls/openalgo/main/install/web-install.sh | sudo bash
+```
+
+Open the secure URL printed in your terminal (e.g. `http://YOUR_SERVER_IP:5000/?token=...`), fill in your domain, broker API credentials, and SSL settings in the web UI, and click **Start Installation**.
+
+---
+
+### Local Development / Quick Start with UV
+
+OpenAlgo uses the modern `uv` package manager for fast, reliable local development:
 
 ```bash
 # Clone the repository
