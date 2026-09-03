@@ -722,6 +722,7 @@ HTML_PAGE = """<!DOCTYPE html>
               <label class="block text-xs font-medium text-slate-300 mb-1.5">Domain Name (Recommended)</label>
               <div class="relative">
                 <input type="text" id="domain" name="domain" placeholder="algo.yourdomain.com"
+                  oninput="updateCallbackPreview(); debounceDnsCheck();"
                   class="w-full bg-slate-900/80 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition">
               </div>
               <div id="dnsStatus" class="text-xs mt-1.5 hidden flex items-center"></div>
@@ -734,7 +735,7 @@ HTML_PAGE = """<!DOCTYPE html>
                 <span class="text-xs text-slate-400">Provisions free HTTPS SSL certificate with auto-renewal</span>
               </div>
               <label class="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" id="use_ssl" name="use_ssl" checked class="sr-only peer">
+                <input type="checkbox" id="use_ssl" name="use_ssl" checked onchange="updateCallbackPreview()" class="sr-only peer">
                 <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-600"></div>
               </label>
             </div>
@@ -751,7 +752,7 @@ HTML_PAGE = """<!DOCTYPE html>
           <div class="space-y-4">
             <div>
               <label class="block text-xs font-medium text-slate-300 mb-1.5">Choose Broker</label>
-              <select id="broker" name="broker" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition">
+              <select id="broker" name="broker" onchange="updateXtsVisibility(); updateCallbackPreview();" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition">
 BROKER_OPTIONS_PLACEHOLDER
               </select>
             </div>
@@ -796,7 +797,7 @@ BROKER_OPTIONS_PLACEHOLDER
                 <span class="text-slate-400 block mb-0.5">Your Broker Redirect / Callback URL:</span>
                 <span id="callbackPreview" class="font-mono text-emerald-400 truncate block">https://algo.yourdomain.com/acagarwal/callback</span>
               </div>
-              <button type="button" onclick="copyCallbackUrl()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 flex items-center shrink-0 transition">
+              <button type="button" id="copyBtn" onclick="copyCallbackUrl()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 flex items-center shrink-0 transition">
                 <i class="fa-regular fa-copy mr-1.5"></i> Copy
               </button>
             </div>
@@ -1043,9 +1044,12 @@ BROKER_OPTIONS_PLACEHOLDER
     }
 
     function updateCallbackPreview() {
-      const broker = document.getElementById('broker').value;
-      const domain = document.getElementById('domain').value.trim();
-      const useSsl = document.getElementById('use_ssl').checked;
+      const brokerEl = document.getElementById('broker');
+      const broker = (brokerEl && brokerEl.value) ? brokerEl.value : 'acagarwal';
+      const domainEl = document.getElementById('domain');
+      const domain = domainEl ? domainEl.value.trim() : '';
+      const useSslEl = document.getElementById('use_ssl');
+      const useSsl = useSslEl ? useSslEl.checked : true;
 
       let base = '';
       if (domain) {
@@ -1053,13 +1057,26 @@ BROKER_OPTIONS_PLACEHOLDER
       } else {
         base = `http://${serverIp}:5000`;
       }
-      document.getElementById('callbackPreview').textContent = `${base}/${broker}/callback`;
+      const previewEl = document.getElementById('callbackPreview');
+      if (previewEl) {
+        previewEl.textContent = `${base}/${broker}/callback`;
+      }
     }
 
     function copyCallbackUrl() {
-      const url = document.getElementById('callbackPreview').textContent;
-      navigator.clipboard.writeText(url);
-      alert('Callback URL copied to clipboard: ' + url);
+      const previewEl = document.getElementById('callbackPreview');
+      const url = previewEl ? previewEl.textContent : '';
+      if (!url) return;
+      navigator.clipboard.writeText(url).then(() => {
+        const btn = document.getElementById('copyBtn');
+        if (btn) {
+          const orig = btn.innerHTML;
+          btn.innerHTML = '<i class="fa-solid fa-check text-emerald-400 mr-1.5"></i> Copied!';
+          setTimeout(() => { btn.innerHTML = orig; }, 2000);
+        }
+      }).catch(() => {
+        prompt('Copy your Callback URL:', url);
+      });
     }
 
     async function handleInstallSubmit(e) {
