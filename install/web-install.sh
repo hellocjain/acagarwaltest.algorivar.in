@@ -57,9 +57,10 @@ if ! command -v python3 >/dev/null 2>&1; then
     exit 1
 fi
 
-# Allow port 5000 in firewall if UFW is active
+# Allow ports 5050, 5000, 80, 443 in firewall if UFW is active
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
-    echo -e "${YELLOW}[2/3] Opening ports 5000, 80, 443 in UFW firewall...${NC}"
+    echo -e "${YELLOW}[2/3] Opening ports 5050, 5000, 80, 443 in UFW firewall...${NC}"
+    ufw allow 5050/tcp >/dev/null 2>&1 || true
     ufw allow 5000/tcp >/dev/null 2>&1 || true
     ufw allow 80/tcp >/dev/null 2>&1 || true
     ufw allow 443/tcp >/dev/null 2>&1 || true

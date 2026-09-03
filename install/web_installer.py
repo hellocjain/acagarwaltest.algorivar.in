@@ -25,7 +25,7 @@ import urllib.request
 from typing import Any, Dict, List, Optional
 
 INSTALL_DIR = "/var/python/openalgo"
-DEFAULT_PORT = 5000
+DEFAULT_PORT = 5050
 
 
 def get_default_repo_url() -> str:
@@ -631,8 +631,8 @@ WantedBy=multi-user.target
             stream_log(f"Failed to write systemd unit: {e}", "ERROR")
 
     execute_cmd(
-        "systemctl daemon-reload && systemctl enable openalgo",
-        "Configuring openalgo systemd service",
+        "systemctl daemon-reload && systemctl enable openalgo && systemctl restart openalgo",
+        "Starting openalgo service on port 5000",
     )
 
     # Final summary & completion
@@ -651,18 +651,16 @@ WantedBy=multi-user.target
     }
     stream_log(f"🎉 OpenAlgo installation complete! Access your dashboard at: {completed_url}", "SUCCESS")
 
-    def auto_shutdown_and_start_service():
-        time.sleep(2.0)
-        execute_cmd("systemctl restart openalgo", "Starting openalgo service on port 5000")
+    def auto_shutdown():
+        time.sleep(3.0)
         print("\n" + "=" * 65)
         print("🎉 OpenAlgo is now live and running in the background!")
         print(f"👉 Access your dashboard at: {completed_url}")
         print("=" * 65 + "\n")
-        time.sleep(1.0)
         os._exit(0)
 
     if not _dry_run:
-        threading.Thread(target=auto_shutdown_and_start_service, daemon=True).start()
+        threading.Thread(target=auto_shutdown, daemon=True).start()
 
 
 HTML_PAGE = """<!DOCTYPE html>
