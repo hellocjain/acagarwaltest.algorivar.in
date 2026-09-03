@@ -81,7 +81,7 @@ function generateRandomState(): string {
 
 export default function BrokerSelect() {
   const { user } = useAuthStore()
-  const [selectedBroker, setSelectedBroker] = useState<string>('')
+  const [selectedBroker, setSelectedBroker] = useState<string>('acagarwal')
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -99,7 +99,7 @@ export default function BrokerSelect() {
         if (data.status === 'success') {
           setBrokerConfig(data)
           // Auto-select the configured broker
-          setSelectedBroker(data.broker_name)
+          setSelectedBroker(data.broker_name || 'acagarwal')
         } else {
           setError(data.message || 'Failed to load broker configuration')
         }
@@ -280,13 +280,11 @@ export default function BrokerSelect() {
                       <SelectValue placeholder="Select a Broker" />
                     </SelectTrigger>
                     <SelectContent>
-                      {allBrokers
-                        .filter((broker) => broker.id === brokerConfig?.broker_name)
-                        .map((broker) => (
-                          <SelectItem key={broker.id} value={broker.id}>
-                            {broker.name}
-                          </SelectItem>
-                        ))}
+                      {allBrokers.map((broker) => (
+                        <SelectItem key={broker.id} value={broker.id}>
+                          {broker.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
