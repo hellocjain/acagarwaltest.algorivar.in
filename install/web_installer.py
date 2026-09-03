@@ -690,19 +690,19 @@ HTML_PAGE = """<!DOCTYPE html>
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center" id="diagGrid">
           <div class="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700/50">
             <span class="text-xs text-slate-400 block">OS</span>
-            <span class="font-semibold text-sm text-slate-200" id="diagOS">Checking...</span>
+            <span class="font-semibold text-sm text-slate-200" id="diagOS">DIAG_OS_PLACEHOLDER</span>
           </div>
           <div class="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700/50">
             <span class="text-xs text-slate-400 block">RAM</span>
-            <span class="font-semibold text-sm text-slate-200" id="diagRAM">...</span>
+            <span class="font-semibold text-sm text-slate-200" id="diagRAM">DIAG_RAM_PLACEHOLDER</span>
           </div>
           <div class="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700/50">
             <span class="text-xs text-slate-400 block">Free Disk</span>
-            <span class="font-semibold text-sm text-slate-200" id="diagDisk">...</span>
+            <span class="font-semibold text-sm text-slate-200" id="diagDisk">DIAG_DISK_PLACEHOLDER</span>
           </div>
           <div class="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700/50">
             <span class="text-xs text-slate-400 block">Public IP</span>
-            <span class="font-semibold text-sm text-emerald-400 font-mono" id="diagIP">...</span>
+            <span class="font-semibold text-sm text-emerald-400 font-mono" id="diagIP">DIAG_IP_PLACEHOLDER</span>
           </div>
         </div>
       </div>
@@ -752,7 +752,7 @@ HTML_PAGE = """<!DOCTYPE html>
             <div>
               <label class="block text-xs font-medium text-slate-300 mb-1.5">Choose Broker</label>
               <select id="broker" name="broker" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition">
-                <!-- Populated dynamically via JS -->
+BROKER_OPTIONS_PLACEHOLDER
               </select>
             </div>
 
@@ -952,45 +952,34 @@ HTML_PAGE = """<!DOCTYPE html>
   </main>
 
   <script>
-    const brokersList = JSON.parse('BROKERS_JSON_PLACEHOLDER');
-    const xtsBrokers = JSON.parse('XTS_BROKERS_JSON_PLACEHOLDER');
+    const xtsBrokers = ["acagarwal", "fivepaisaxts", "compositedge", "ibulls", "iifl", "jainamxts", "rmoney", "wisdom"];
     const securityToken = 'SECURITY_TOKEN_PLACEHOLDER';
 
-    let serverIp = '127.0.0.1';
+    let serverIp = 'DIAG_IP_PLACEHOLDER';
     let dnsTimer = null;
 
     // Initialize UI
     window.addEventListener('DOMContentLoaded', () => {
-      populateBrokers();
-      fetchSystemInfo();
       setupEventListeners();
-    });
-
-    function populateBrokers() {
-      const select = document.getElementById('broker');
-      brokersList.forEach(([code, name]) => {
-        const opt = document.createElement('option');
-        opt.value = code;
-        opt.textContent = name;
-        if (code === 'acagarwal') opt.selected = true;
-        select.appendChild(opt);
-      });
       updateXtsVisibility();
       updateCallbackPreview();
-    }
+      fetchSystemInfo();
+    });
 
     async function fetchSystemInfo() {
       try {
         const res = await fetch(`/api/system-info?token=${securityToken}`);
         const data = await res.json();
-        document.getElementById('diagOS').textContent = data.os || 'Ubuntu';
-        document.getElementById('diagRAM').textContent = `${data.total_ram_gb} GB`;
-        document.getElementById('diagDisk').textContent = `${data.free_disk_gb} GB`;
-        document.getElementById('diagIP').textContent = data.public_ip || '127.0.0.1';
-        serverIp = data.public_ip || '127.0.0.1';
-        updateCallbackPreview();
+        if (data.os) document.getElementById('diagOS').textContent = data.os;
+        if (data.total_ram_gb) document.getElementById('diagRAM').textContent = `${data.total_ram_gb} GB`;
+        if (data.free_disk_gb) document.getElementById('diagDisk').textContent = `${data.free_disk_gb} GB`;
+        if (data.public_ip) {
+          document.getElementById('diagIP').textContent = data.public_ip;
+          serverIp = data.public_ip;
+          updateCallbackPreview();
+        }
       } catch (err) {
-        console.error('Failed to fetch diagnostics', err);
+        console.error('Diagnostics refresh:', err);
       }
     }
 
@@ -1223,13 +1212,21 @@ class WebInstallerHTTPHandler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/" or path == "/index.html":
+            diag = get_system_diagnostics()
+            broker_options = "\n".join(
+                [
+                    f'                <option value="{code}" {"selected" if code == "acagarwal" else ""}>{name}</option>'
+                    for code, name in ALL_BROKERS
+                ]
+            )
             html = (
-                HTML_PAGE.replace(
-                    "BROKERS_JSON_PLACEHOLDER", json.dumps(ALL_BROKERS)
-                )
-                .replace("XTS_BROKERS_JSON_PLACEHOLDER", json.dumps(XTS_BROKERS))
+                HTML_PAGE.replace("BROKER_OPTIONS_PLACEHOLDER", broker_options)
                 .replace("SECURITY_TOKEN_PLACEHOLDER", _security_token)
                 .replace("REPO_URL_PLACEHOLDER", REPO_URL)
+                .replace("DIAG_OS_PLACEHOLDER", str(diag.get("os", "Linux (Ubuntu)")))
+                .replace("DIAG_RAM_PLACEHOLDER", f'{diag.get("total_ram_gb", 1.0)} GB')
+                .replace("DIAG_DISK_PLACEHOLDER", f'{diag.get("free_disk_gb", 10.0)} GB')
+                .replace("DIAG_IP_PLACEHOLDER", str(diag.get("public_ip", "127.0.0.1")))
             )
             body = html.encode("utf-8")
             self.send_response(200)
