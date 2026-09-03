@@ -631,8 +631,8 @@ WantedBy=multi-user.target
             stream_log(f"Failed to write systemd unit: {e}", "ERROR")
 
     execute_cmd(
-        "systemctl daemon-reload && systemctl enable openalgo && systemctl restart openalgo",
-        "Enabling and starting openalgo service",
+        "systemctl daemon-reload && systemctl enable openalgo",
+        "Configuring openalgo systemd service",
     )
 
     # Final summary & completion
@@ -650,6 +650,19 @@ WantedBy=multi-user.target
         "mcp_url": f"https://{domain}/mcp" if enable_mcp and domain else "",
     }
     stream_log(f"🎉 OpenAlgo installation complete! Access your dashboard at: {completed_url}", "SUCCESS")
+
+    def auto_shutdown_and_start_service():
+        time.sleep(2.0)
+        execute_cmd("systemctl restart openalgo", "Starting openalgo service on port 5000")
+        print("\n" + "=" * 65)
+        print("🎉 OpenAlgo is now live and running in the background!")
+        print(f"👉 Access your dashboard at: {completed_url}")
+        print("=" * 65 + "\n")
+        time.sleep(1.0)
+        os._exit(0)
+
+    if not _dry_run:
+        threading.Thread(target=auto_shutdown_and_start_service, daemon=True).start()
 
 
 HTML_PAGE = """<!DOCTYPE html>
@@ -1205,6 +1218,13 @@ BROKER_OPTIONS_PLACEHOLDER
 
             const link = document.getElementById('dashboardLink');
             link.href = data.completed_url;
+
+            const submitBtn = document.getElementById('submitBtn');
+            if (submitBtn) {
+              submitBtn.disabled = true;
+              submitBtn.className = 'w-full py-3.5 px-6 rounded-2xl bg-emerald-600 text-white font-bold text-base shadow-xl flex items-center justify-center space-x-2 opacity-90 cursor-default';
+              submitBtn.innerHTML = '<i class="fa-solid fa-circle-check mr-2"></i> OpenAlgo Installed & Running';
+            }
           } else if (data.status === 'error') {
             evtSource.close();
             stageBadge.textContent = 'Failed';
