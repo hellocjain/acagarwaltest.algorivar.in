@@ -29,7 +29,7 @@ def get_api_response(endpoint, auth, method="GET", payload="", feed_token=None, 
     client = get_httpx_client()
 
     headers = {
-        "authorization": FEED_TOKEN,
+        "authorization": FEED_TOKEN if FEED_TOKEN else "",
         "Content-Type": "application/json",
     }
     url = f"{MARKET_DATA_URL}{endpoint}"
@@ -43,7 +43,11 @@ def get_api_response(endpoint, auth, method="GET", payload="", feed_token=None, 
             response = client.request(method, url, headers=headers, json=payload if payload else {})
 
         response.status = response.status_code
-        return response.json()
+        try:
+            return response.json()
+        except Exception:
+            logger.error(f"Non-JSON response from {url} (status {response.status_code}): {response.text[:200]}")
+            return {"type": "error", "description": f"HTTP {response.status_code}: {response.text[:200]}"}
     except Exception as e:
         logger.error(f"Market Data API request failed: {str(e)}")
         raise
@@ -54,6 +58,21 @@ class BrokerData:
         self.auth_token = auth_token
         self.feed_token = feed_token
         self.user_id = user_id
+
+        if not self.feed_token:
+            try:
+                from database.auth_db import get_feed_token as db_get_feed_token
+                user = None
+                try:
+                    user = session.get("user")
+                except Exception:
+                    pass
+                self.feed_token = db_get_feed_token(user or self.user_id or "Chinmaya")
+            except Exception:
+                pass
+
+        if not self.feed_token:
+            self._refresh_feed_token()
 
         self.timeframe_map = {
             "1s": "1",
@@ -77,6 +96,11 @@ class BrokerData:
             self.feed_token = new_feed_token
             if user_id:
                 self.user_id = user_id
+            try:
+                from database.auth_db import store_feed_token
+                store_feed_token(self.user_id or "Chinmaya", new_feed_token)
+            except Exception:
+                pass
             return True
         except Exception as e:
             logger.error(f"Error refreshing feed token: {e}")
@@ -264,7 +288,7 @@ class BrokerData:
 
     def get_history(self, symbol, exchange, timeframe, from_date, to_date):
         """
-        Get historical OHLCV candle data.
+        Get historical OHLCV candle data as a pandas DataFrame.
         """
         try:
             compression_map = {
@@ -283,81 +307,179 @@ class BrokerData:
             if not compression_value:
                 raise Exception(f"Unsupported timeframe: {timeframe}")
 
-            symbol_info, brexchange = self._get_instrument_token(symbol, exchange)
+            br_symbol = get_br_symbol(symbol, exchange)
 
-            params = {
-                "exchangeSegment": brexchange,
-                "exchangeInstrumentID": int(symbol_info.token),
-                "startTime": from_date,
-                "endTime": to_date,
-                "compressionValue": compression_value,
+            segment_map = {
+                "NSE": "NSECM",
+                "BSE": "BSECM",
+                "NFO": "NSEFO",
+                "BFO": "BSEFO",
+                "CDS": "NSECD",
+                "MCX": "MCXFO",
+                "NSE_INDEX": "NSECM",
+                "BSE_INDEX": "BSECM",
             }
+            exchange_segment = segment_map.get(exchange)
+            if not exchange_segment:
+                raise Exception(f"Unsupported exchange: {exchange}")
 
-            response = get_api_response(
-                "/instruments/historical/chart",
-                self.auth_token,
-                method="GET",
-                params=params,
-                feed_token=self.feed_token,
+            symbol_info, _ = self._get_instrument_token(symbol, exchange)
+            token = symbol_info.token
+
+            # Convert dates to datetime objects with IST timezone
+            start_date = pd.to_datetime(from_date).tz_localize("Asia/Kolkata")
+            end_date = pd.to_datetime(to_date).tz_localize("Asia/Kolkata")
+
+            from_dt = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            to_dt = end_date.replace(hour=23, minute=59, second=59, microsecond=0)
+
+            dfs = []
+            current_start = from_dt
+
+            while current_start <= to_dt:
+                current_end = min(current_start + timedelta(days=6), to_dt)
+
+                from_str = current_start.strftime("%b %d %Y %H%M%S")
+                to_str = current_end.strftime("%b %d %Y %H%M%S")
+
+                params = {
+                    "exchangeSegment": exchange_segment,
+                    "exchangeInstrumentID": int(token),
+                    "startTime": from_str,
+                    "endTime": to_str,
+                    "compressionValue": compression_value,
+                }
+
+                response = get_api_response(
+                    "/instruments/ohlc",
+                    self.auth_token,
+                    method="GET",
+                    feed_token=self.feed_token,
+                    params=params,
+                )
+
+                if not response or response.get("type") != "success":
+                    error_msg = response.get("description", "Unknown error") if response else "No response"
+                    if any(kw in str(error_msg).lower() for kw in ("invalid token", "session", "token")):
+                        if self._refresh_feed_token():
+                            response = get_api_response(
+                                "/instruments/ohlc",
+                                self.auth_token,
+                                method="GET",
+                                feed_token=self.feed_token,
+                                params=params,
+                            )
+                    if not response or response.get("type") != "success":
+                        logger.warning(f"Failed to fetch OHLC for {from_str} to {to_str}: {response}")
+                        current_start = current_end + timedelta(days=1)
+                        continue
+
+                raw_data = response.get("result", {}).get("dataReponse", "")
+                if not raw_data:
+                    current_start = current_end + timedelta(days=1)
+                    continue
+
+                rows = raw_data.strip().split(",")
+                data = []
+                for row in rows:
+                    fields = row.split("|")
+                    if len(fields) < 6:
+                        continue
+                    try:
+                        oi_val = int(float(fields[6])) if len(fields) > 6 else 0
+                        data.append(
+                            {
+                                "timestamp": int(fields[0]),
+                                "open": float(fields[1]),
+                                "high": float(fields[2]),
+                                "low": float(fields[3]),
+                                "close": float(fields[4]),
+                                "volume": int(float(fields[5])),
+                                "oi": oi_val,
+                            }
+                        )
+                    except (ValueError, IndexError):
+                        continue
+
+                if data:
+                    dfs.append(pd.DataFrame(data))
+
+                current_start = current_end + timedelta(days=1)
+
+            if not dfs:
+                return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "oi"])
+
+            final_df = pd.concat(dfs, ignore_index=True)
+            final_df = (
+                final_df.sort_values("timestamp")
+                .drop_duplicates("timestamp")
+                .reset_index(drop=True)
             )
 
-            if response and response.get("type") == "success":
-                data_points = response.get("result", {}).get("dataReponse", "")
-                if data_points:
-                    rows = data_points.split(",")
-                    parsed_candles = []
-                    for row in rows:
-                        parts = row.strip().split("|")
-                        if len(parts) >= 6:
-                            try:
-                                ts = int(parts[0])
-                                open_p = float(parts[1])
-                                high_p = float(parts[2])
-                                low_p = float(parts[3])
-                                close_p = float(parts[4])
-                                vol = int(float(parts[5]))
-                                oi = int(float(parts[6])) if len(parts) > 6 else 0
-                                parsed_candles.append({
-                                    "timestamp": ts,
-                                    "open": open_p,
-                                    "high": high_p,
-                                    "low": low_p,
-                                    "close": close_p,
-                                    "volume": vol,
-                                    "oi": oi,
-                                })
-                            except Exception:
-                                continue
-                    return parsed_candles
-            return []
+            final_df["timestamp"] = pd.to_datetime(final_df["timestamp"], unit="s")
+
+            if compression_value == "D":
+                final_df["timestamp"] = final_df["timestamp"].apply(
+                    lambda x: x.replace(hour=0, minute=0, second=0)
+                )
+            else:
+                final_df["timestamp"] = final_df["timestamp"] - pd.Timedelta(hours=5, minutes=30)
+                interval_minutes = int(compression_value) // 60 if compression_value != "D" else 0
+                if interval_minutes > 0:
+                    final_df["timestamp"] = final_df["timestamp"].dt.floor(f"{interval_minutes}min")
+
+            final_df["timestamp"] = final_df["timestamp"].astype("int64") // 10**9
+
+            numeric_columns = ["open", "high", "low", "close", "volume"]
+            final_df[numeric_columns] = final_df[numeric_columns].apply(pd.to_numeric)
+            if "oi" not in final_df.columns:
+                final_df["oi"] = 0
+            else:
+                final_df["oi"] = pd.to_numeric(final_df["oi"]).fillna(0).astype(int)
+
+            return final_df
+
         except Exception as e:
-            logger.error(f"Error fetching history for {symbol}:{exchange}: {e}")
-            return []
+            logger.error(f"Error fetching historical data for {symbol}:{exchange}: {str(e)}")
+            return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "oi"])
 
     def get_intervals(self):
         return ["1s", "1m", "2m", "3m", "5m", "10m", "15m", "30m", "60m", "D"]
 
 
+def _get_context_feed_token():
+    try:
+        from database.auth_db import get_feed_token as db_get_feed_token
+        user = None
+        try:
+            user = session.get("user")
+        except Exception:
+            pass
+        return db_get_feed_token(user or "Chinmaya")
+    except Exception:
+        return None
+
+
 def get_quotes(symbol, exchange, auth=None):
-    feed_token = get_feed_token()
+    feed_token = _get_context_feed_token()
     bd = BrokerData(auth_token=auth, feed_token=feed_token)
     return bd.get_quotes(symbol, exchange)
 
 
 def get_market_depth(symbol, exchange, auth=None):
-    feed_token = get_feed_token()
+    feed_token = _get_context_feed_token()
     bd = BrokerData(auth_token=auth, feed_token=feed_token)
     return bd.get_market_depth(symbol, exchange)
 
 
 def get_depth(symbol, exchange):
-    feed_token = get_feed_token()
+    feed_token = _get_context_feed_token()
     bd = BrokerData(auth_token=None, feed_token=feed_token)
     return bd.get_depth(symbol, exchange)
 
 
 def get_history(symbol, exchange, interval, from_date, to_date, auth=None):
-    feed_token = get_feed_token()
+    feed_token = _get_context_feed_token()
     bd = BrokerData(auth_token=auth, feed_token=feed_token)
     return bd.get_history(symbol, exchange, interval, from_date, to_date)
 

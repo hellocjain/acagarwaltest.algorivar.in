@@ -222,3 +222,42 @@ def test_streaming_exchange_mapper():
 def test_adapter_factory_resolution():
     adapter_cls = _get_adapter_class("acagarwal")
     assert adapter_cls == AcagarwalWebSocketAdapter
+
+
+def test_acagarwal_get_history_ohlc(monkeypatch):
+    import pandas as pd
+    from broker.acagarwal.api.data import BrokerData
+
+    bd = BrokerData(auth_token="fake_auth", feed_token="fake_feed")
+
+    # Mock _get_instrument_token
+    class FakeSymToken:
+        token = "574824"
+    monkeypatch.setattr(bd, "_get_instrument_token", lambda s, e: (FakeSymToken(), "MCXFO"))
+
+    # Mock get_api_response
+    mock_ohlc_response = {
+        "type": "success",
+        "code": "s-instrument-0002",
+        "result": {
+            "dataReponse": "1787908799|2433|2433|2430|2431|154|33279|,1787909099|2433|2433|2431|2432|118|33275|"
+        }
+    }
+    monkeypatch.setattr(
+        "broker.acagarwal.api.data.get_api_response",
+        lambda endpoint, auth, method="GET", payload="", feed_token=None, params=None: mock_ohlc_response
+    )
+
+    df = bd.get_history("SILVER10030SEP26FUT", "MCX", "5m", "2026-08-28", "2026-09-03")
+    assert isinstance(df, pd.DataFrame)
+    assert len(df) == 2
+    assert "timestamp" in df.columns
+    assert "open" in df.columns
+    assert "close" in df.columns
+    assert "volume" in df.columns
+    assert "oi" in df.columns
+    assert df["open"].iloc[0] == 2433.0
+    assert df["close"].iloc[0] == 2431.0
+    assert df["volume"].iloc[0] == 154
+    assert df["oi"].iloc[0] == 33279
+
