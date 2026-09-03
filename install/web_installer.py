@@ -158,6 +158,13 @@ def get_system_diagnostics() -> Dict[str, Any]:
             avail_kb = int(mem["MemAvailable"].split()[0])
             free_ram_gb = round(avail_kb / 1024 / 1024, 2)
 
+    # Swap metrics
+    swap_total_gb = 0.0
+    if os.path.exists("/proc/meminfo"):
+        if "SwapTotal" in mem:
+            swap_kb = int(mem["SwapTotal"].split()[0])
+            swap_total_gb = round(swap_kb / 1024 / 1024, 2)
+
     # Free Disk
     disk = shutil.disk_usage("/")
     free_disk_gb = round(disk.free / (1024**3), 2)
@@ -170,6 +177,7 @@ def get_system_diagnostics() -> Dict[str, Any]:
         "os": os_info,
         "total_ram_gb": total_ram_gb,
         "free_ram_gb": free_ram_gb,
+        "swap_total_gb": swap_total_gb,
         "free_disk_gb": free_disk_gb,
         "total_disk_gb": total_disk_gb,
         "cpu_cores": cpu_cores,
@@ -300,6 +308,8 @@ def run_installation_pipeline(config: Dict[str, Any]):
     _install_state["stage"] = 1
     _install_state["message"] = "Starting installation..."
 
+    diag = get_system_diagnostics()
+
     domain = config.get("domain", "").strip()
     use_ssl = config.get("use_ssl", True)
     broker = config.get("broker", "acagarwal").strip().lower()
@@ -347,16 +357,18 @@ def run_installation_pipeline(config: Dict[str, Any]):
         _install_state["error"] = "Failed to install required system packages via apt-get."
         return
 
-    # Check & create Swap if RAM < 2GB
-    diag = get_system_diagnostics()
-    if diag["total_ram_gb"] < 1.8:
-        stream_log("System RAM < 2GB. Configuring 2GB swap file...", "INFO")
-        swap_cmd = (
-            "if [ ! -f /swapfile ]; then "
-            "fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && "
-            "grep -q '/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab; fi"
-        )
-        execute_cmd(swap_cmd, "Configuring Swap Space")
+    # Check and configure 2GB swap space if total swap < 2GB
+    stream_log("Checking server swap space...", "INFO")
+    swap_cmd = (
+        "SWAP_KB=$(grep SwapTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || echo 0); "
+        "if [ \"$SWAP_KB\" -lt 2000000 ] && [ ! -f /swapfile ]; then "
+        "(fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none) && "
+        "chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && "
+        "grep -q '/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab; "
+        "sysctl vm.swappiness=10 || true; "
+        "fi"
+    )
+    execute_cmd(swap_cmd, "Configuring 2GB persistent swap space")
 
     # STAGE 2: Install uv Python Package Manager
     _install_state["stage"] = 2

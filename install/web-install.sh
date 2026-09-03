@@ -27,8 +27,16 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-if [ -n "$OPENALGO_REPO_URL" ]; then
-    echo -e "${BLUE}Using Custom Repository:${NC} ${OPENALGO_REPO_URL}"
+# Check and automatically create 2GB Swap if total swap < 2GB
+SWAP_TOTAL_KB=$(grep SwapTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || echo 0)
+if [ "$SWAP_TOTAL_KB" -lt 2000000 ] && [ ! -f /swapfile ]; then
+    echo -e "${YELLOW}Allocating 2GB swap space to prevent memory issues...${NC}"
+    (fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none) && \
+    chmod 600 /swapfile && \
+    mkswap /swapfile >/dev/null 2>&1 && \
+    swapon /swapfile >/dev/null 2>&1 || true
+    grep -q '/swapfile' /etc/fstab 2>/dev/null || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    sysctl vm.swappiness=10 >/dev/null 2>&1 || true
 fi
 
 # Detect Package Manager
