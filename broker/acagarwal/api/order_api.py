@@ -237,7 +237,27 @@ def place_order_api(data, auth):
     ):
         newdata = data.copy()
     else:
-        token = get_token(data["symbol"], data["exchange"])
+        sym = data.get("symbol", "")
+        exch = data.get("exchange", "")
+        token = get_token(sym, exch)
+        if not token and exch in ("NSE", "BSE") and not sym.endswith("-EQ"):
+            token = get_token(f"{sym}-EQ", exch)
+            if token:
+                data = data.copy()
+                data["symbol"] = f"{sym}-EQ"
+
+        if not token:
+            class DummyResponse:
+                status = 400
+                status_code = 400
+
+            err_msg = f"Token not found for symbol '{sym}' on exchange '{exch}'"
+            return (
+                DummyResponse(),
+                {"type": "error", "code": "e-orders-symbol-not-found", "description": err_msg, "message": err_msg},
+                None,
+            )
+
         newdata = transform_data(data, token)
 
     # Symphony XTS rejects pure MARKET orders and price=0 for ALGO enabled accounts with code e-orders-0002.
