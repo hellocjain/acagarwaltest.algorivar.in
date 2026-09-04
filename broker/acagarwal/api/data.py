@@ -124,11 +124,13 @@ class BrokerData:
             raise Exception(f"Unknown exchange segment: {exchange}")
 
         with db_session() as s:
-            symbol_info = (
-                s.query(SymToken)
-                .filter(SymToken.exchange == exchange, SymToken.brsymbol == br_symbol)
-                .first()
-            )
+            symbol_info = None
+            if br_symbol:
+                symbol_info = (
+                    s.query(SymToken)
+                    .filter(SymToken.exchange == exchange, SymToken.brsymbol == br_symbol)
+                    .first()
+                )
 
             if not symbol_info:
                 # Fallback matching on symbol
@@ -138,8 +140,16 @@ class BrokerData:
                     .first()
                 )
 
+            if not symbol_info and exchange in ("NSE", "BSE") and not symbol.endswith("-EQ"):
+                # Fallback for equity symbols without -EQ suffix
+                symbol_info = (
+                    s.query(SymToken)
+                    .filter(SymToken.exchange == exchange, SymToken.symbol == f"{symbol}-EQ")
+                    .first()
+                )
+
             if not symbol_info:
-                raise Exception(f"Could not find exchange token for {exchange}:{br_symbol}")
+                raise Exception(f"Could not find exchange token for {exchange}:{symbol}")
 
             return symbol_info, brexchange
 

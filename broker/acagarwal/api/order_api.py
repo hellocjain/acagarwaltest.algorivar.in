@@ -14,11 +14,61 @@ from broker.acagarwal.mapping.transform_data import (
     transform_modify_order_data,
 )
 from database.auth_db import get_auth_token
-from database.token_db import get_br_symbol, get_symbol, get_token
+from database.token_db import get_br_symbol, get_symbol, get_symbol_info, get_token
 from utils.httpx_client import get_httpx_client
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _get_market_protection_price(symbol: str, exchange: str, action: str, auth: str) -> float | None:
+    """
+    Fetch current market quote and compute a marketable limit price with protection buffer.
+    Required because AC Agarwal Symphony XTS API accounts (ALGO enabled) reject pure MARKET orders
+    with code 'e-orders-0002': 'Market order Or Price 0 is not allowed for ALGO enabled orders.'
+    """
+    try:
+        from broker.acagarwal.api.data import BrokerData
+
+        bd = BrokerData(auth)
+        quotes = bd.get_quotes(symbol, exchange)
+        if not quotes:
+            return None
+
+        ask = float(quotes.get("ask") or 0)
+        bid = float(quotes.get("bid") or 0)
+        ltp = float(quotes.get("ltp") or 0)
+        prev_close = float(quotes.get("prev_close") or 0)
+
+        sinfo = get_symbol_info(symbol, exchange)
+        tick_size = float(sinfo.tick_size) if (sinfo and sinfo.tick_size) else 0.05
+        if tick_size <= 0:
+            tick_size = 0.05
+
+        action_upper = str(action).upper()
+        if action_upper == "BUY":
+            ref = ask if ask > 0 else (ltp if ltp > 0 else prev_close)
+            if ref <= 0:
+                return None
+            # 1% price protection buffer, at least 4 ticks
+            buffer = max(ref * 0.01, tick_size * 4)
+            limit_price = ref + buffer
+        else:
+            ref = bid if bid > 0 else (ltp if ltp > 0 else prev_close)
+            if ref <= 0:
+                return None
+            # 1% price protection buffer, at least 4 ticks
+            buffer = max(ref * 0.01, tick_size * 4)
+            limit_price = max(tick_size, ref - buffer)
+
+        # Snap to tick size
+        limit_price = round(round(limit_price / tick_size) * tick_size, 4)
+        if limit_price.is_integer():
+            limit_price = int(limit_price)
+        return limit_price
+    except Exception as e:
+        logger.error(f"Failed to calculate market protection price for {symbol}:{exchange}: {e}")
+        return None
 
 
 def get_api_response(endpoint, auth, method="GET", payload=""):
@@ -161,10 +211,67 @@ def place_order_api(data, auth):
         key in data
         for key in ["exchangeSegment", "exchangeInstrumentID", "productType", "orderType"]
     ):
-        newdata = data
+        newdata = data.copy()
     else:
         token = get_token(data["symbol"], data["exchange"])
         newdata = transform_data(data, token)
+
+    # Symphony XTS rejects pure MARKET orders and price=0 for ALGO enabled accounts with code e-orders-0002.
+    # Convert MARKET orders to marketable LIMIT orders with price protection.
+    is_market = newdata.get("orderType") == "MARKET" or (
+        newdata.get("orderType") == "LIMIT" and float(newdata.get("limitPrice", 0) or 0) == 0
+    )
+    is_stop_market = newdata.get("orderType") == "STOPMARKET"
+
+    if is_market or is_stop_market:
+        sym = data.get("symbol")
+        exch = data.get("exchange")
+        if not sym or not exch:
+            token_id = str(newdata.get("exchangeInstrumentID", ""))
+            seg = newdata.get("exchangeSegment", "")
+            reverse_seg_map = {
+                "NSECM": "NSE",
+                "BSECM": "BSE",
+                "MCXFO": "MCX",
+                "NSEFO": "NFO",
+                "BSEFO": "BFO",
+                "NSECD": "CDS",
+            }
+            exch = reverse_seg_map.get(seg, "NSE")
+            sym = get_symbol(token_id, exch)
+
+        if sym and exch:
+            sinfo = get_symbol_info(sym, exch)
+            tick_size = float(sinfo.tick_size) if (sinfo and sinfo.tick_size) else 0.05
+            if tick_size <= 0:
+                tick_size = 0.05
+
+            if is_market:
+                limit_price = _get_market_protection_price(sym, exch, newdata.get("orderSide", "BUY"), AUTH_TOKEN)
+                if limit_price:
+                    newdata["orderType"] = "LIMIT"
+                    newdata["limitPrice"] = limit_price
+                    logger.info(
+                        f"Converted MARKET order to marketable LIMIT order with price protection: "
+                        f"{sym}:{exch} {newdata.get('orderSide')} limitPrice={limit_price}"
+                    )
+            elif is_stop_market:
+                stop_price = float(newdata.get("stopPrice", 0) or 0)
+                if stop_price > 0:
+                    action_upper = str(newdata.get("orderSide", "BUY")).upper()
+                    if action_upper == "BUY":
+                        limit_price = stop_price + max(stop_price * 0.01, tick_size * 4)
+                    else:
+                        limit_price = max(tick_size, stop_price - max(stop_price * 0.01, tick_size * 4))
+                    limit_price = round(round(limit_price / tick_size) * tick_size, 4)
+                    if limit_price.is_integer():
+                        limit_price = int(limit_price)
+                    newdata["orderType"] = "STOPLIMIT"
+                    newdata["limitPrice"] = limit_price
+                    logger.info(
+                        f"Converted STOPMARKET to STOPLIMIT with price protection: "
+                        f"{sym}:{exch} stopPrice={stop_price}, limitPrice={limit_price}"
+                    )
 
     headers = {
         "authorization": AUTH_TOKEN,
@@ -181,6 +288,11 @@ def place_order_api(data, auth):
             "error": "Invalid JSON response from server",
             "raw_response": response.text,
         }
+
+    # Standardize error message key so higher-level services receive description
+    if isinstance(response_data, dict):
+        if "message" not in response_data and "description" in response_data:
+            response_data["message"] = response_data["description"]
 
     orderid = (
         response_data.get("result", {}).get("AppOrderID")
@@ -293,6 +405,14 @@ def close_all_positions(current_api_key, auth):
         exchange_segment = position["ExchangeSegment"]
         instrument_id = position.get("ExchangeInstrumentID", position.get("ExchangeInstrumentId"))
 
+        reverse_seg_map = {
+            "NSECM": "NSE",
+            "BSECM": "BSE",
+            "MCXFO": "MCX",
+            "NSEFO": "NFO",
+            "BSEFO": "BFO",
+            "NSECD": "CDS",
+        }
         place_order_payload = {
             "exchangeSegment": exchange_segment,
             "exchangeInstrumentID": instrument_id,
@@ -305,6 +425,8 @@ def close_all_positions(current_api_key, auth):
             "limitPrice": "0",
             "stopPrice": "0",
             "orderUniqueIdentifier": "openalgo",
+            "symbol": position.get("TradingSymbol"),
+            "exchange": reverse_seg_map.get(exchange_segment, "NSE"),
         }
         place_order_api(place_order_payload, auth)
 

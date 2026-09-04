@@ -263,11 +263,17 @@ def place_smart_order_with_auth(
     if res and res.status == 200:
         return True, order_response_data, 200
     else:
-        message = (
-            response_data.get("message", "Failed to place smart order")
-            if isinstance(response_data, dict)
-            else "Failed to place smart order"
-        )
+        if isinstance(response_data, dict):
+            message = (
+                response_data.get("description")
+                or response_data.get("message")
+                or response_data.get("error")
+                or response_data.get("emsg")
+                or response_data.get("error_message")
+                or "Failed to place smart order"
+            )
+        else:
+            message = "Failed to place smart order"
         error_response = {"status": "error", "message": message}
         bus.publish(OrderFailedEvent(
             mode="live", api_type="placesmartorder",
