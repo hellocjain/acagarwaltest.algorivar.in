@@ -227,6 +227,48 @@ class BrokerData:
             logger.error(f"Error in get_quotes for {symbol}:{exchange}: {e}")
             raise
 
+    def get_quotes_by_token(self, token_id: int | str, exchange_segment: int | str) -> dict:
+        """
+        Get quotes directly by instrument token ID and exchange segment.
+        """
+        try:
+            exchange_segment_map = {
+                "NSE": 1, "NSECM": 1, 1: 1,
+                "NSE_INDEX": 1,
+                "NFO": 2, "NSEFO": 2, 2: 2,
+                "CDS": 3, "NSECD": 3, 3: 3,
+                "BSE": 11, "BSECM": 11, 11: 11,
+                "BSE_INDEX": 11,
+                "BFO": 12, "BSEFO": 12, 12: 12,
+                "MCX": 51, "MCXFO": 51, 51: 51,
+            }
+            brex = exchange_segment_map.get(exchange_segment)
+            if brex is None:
+                raise Exception(f"Unknown exchange segment: {exchange_segment}")
+
+            token = {"exchangeSegment": brex, "exchangeInstrumentID": int(token_id)}
+            market_data = self._fetch_market_data(token, 1502)
+            if not market_data:
+                raise Exception(f"Failed to fetch market data for token {token_id}")
+
+            touchline = market_data.get("Touchline", {})
+            return {
+                "ask": touchline.get("AskInfo", {}).get("Price", 0),
+                "ask_qty": touchline.get("AskInfo", {}).get("Size", 0),
+                "bid": touchline.get("BidInfo", {}).get("Price", 0),
+                "bid_qty": touchline.get("BidInfo", {}).get("Size", 0),
+                "high": touchline.get("High", 0),
+                "low": touchline.get("Low", 0),
+                "ltp": touchline.get("LastTradedPrice", 0),
+                "open": touchline.get("Open", 0),
+                "prev_close": touchline.get("Close", 0),
+                "volume": touchline.get("TotalTradedQuantity", 0),
+                "oi": 0,
+            }
+        except Exception as e:
+            logger.error(f"Error in get_quotes_by_token for {token_id}:{exchange_segment}: {e}")
+            raise
+
     def get_market_depth(self, symbol: str, exchange: str) -> dict:
         """
         Get Level 2 market depth.

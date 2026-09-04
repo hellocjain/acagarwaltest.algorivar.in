@@ -21,7 +21,14 @@ from utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-def _get_market_protection_price(symbol: str, exchange: str, action: str, auth: str) -> float | None:
+def _get_market_protection_price(
+    symbol: str | None,
+    exchange: str | None,
+    action: str,
+    auth: str,
+    token_id: str | int | None = None,
+    exchange_segment: str | int | None = None,
+) -> float | None:
     """
     Fetch current market quote and compute a marketable limit price with protection buffer.
     Required because AC Agarwal Symphony XTS API accounts (ALGO enabled) reject pure MARKET orders
@@ -29,9 +36,23 @@ def _get_market_protection_price(symbol: str, exchange: str, action: str, auth: 
     """
     try:
         from broker.acagarwal.api.data import BrokerData
+        from database.token_db import get_symbol_info
 
         bd = BrokerData(auth)
-        quotes = bd.get_quotes(symbol, exchange)
+        quotes = None
+
+        if symbol and exchange:
+            try:
+                quotes = bd.get_quotes(symbol, exchange)
+            except Exception as e:
+                logger.debug(f"get_quotes by symbol ({symbol}:{exchange}) failed: {e}, attempting token lookup")
+
+        if not quotes and token_id and exchange_segment:
+            try:
+                quotes = bd.get_quotes_by_token(token_id, exchange_segment)
+            except Exception as e:
+                logger.debug(f"get_quotes_by_token failed: {e}")
+
         if not quotes:
             return None
 
@@ -40,8 +61,11 @@ def _get_market_protection_price(symbol: str, exchange: str, action: str, auth: 
         ltp = float(quotes.get("ltp") or 0)
         prev_close = float(quotes.get("prev_close") or 0)
 
-        sinfo = get_symbol_info(symbol, exchange)
-        tick_size = float(sinfo.tick_size) if (sinfo and sinfo.tick_size) else 0.05
+        tick_size = 0.05
+        if symbol and exchange:
+            sinfo = get_symbol_info(symbol, exchange)
+            if sinfo and sinfo.tick_size:
+                tick_size = float(sinfo.tick_size)
         if tick_size <= 0:
             tick_size = 0.05
 
@@ -67,7 +91,7 @@ def _get_market_protection_price(symbol: str, exchange: str, action: str, auth: 
             limit_price = int(limit_price)
         return limit_price
     except Exception as e:
-        logger.error(f"Failed to calculate market protection price for {symbol}:{exchange}: {e}")
+        logger.error(f"Failed to calculate market protection price for {symbol}:{exchange} / token {token_id}: {e}")
         return None
 
 
@@ -240,21 +264,31 @@ def place_order_api(data, auth):
             exch = reverse_seg_map.get(seg, "NSE")
             sym = get_symbol(token_id, exch)
 
+        token_id = newdata.get("exchangeInstrumentID")
+        seg = newdata.get("exchangeSegment")
+        tick_size = 0.05
         if sym and exch:
             sinfo = get_symbol_info(sym, exch)
             tick_size = float(sinfo.tick_size) if (sinfo and sinfo.tick_size) else 0.05
-            if tick_size <= 0:
-                tick_size = 0.05
+        if tick_size <= 0:
+            tick_size = 0.05
 
-            if is_market:
-                limit_price = _get_market_protection_price(sym, exch, newdata.get("orderSide", "BUY"), AUTH_TOKEN)
-                if limit_price:
-                    newdata["orderType"] = "LIMIT"
-                    newdata["limitPrice"] = limit_price
-                    logger.info(
-                        f"Converted MARKET order to marketable LIMIT order with price protection: "
-                        f"{sym}:{exch} {newdata.get('orderSide')} limitPrice={limit_price}"
-                    )
+        if is_market:
+            limit_price = _get_market_protection_price(
+                sym,
+                exch,
+                newdata.get("orderSide", "BUY"),
+                AUTH_TOKEN,
+                token_id=token_id,
+                exchange_segment=seg,
+            )
+            if limit_price:
+                newdata["orderType"] = "LIMIT"
+                newdata["limitPrice"] = limit_price
+                logger.info(
+                    f"Converted MARKET order to marketable LIMIT order with price protection: "
+                    f"{sym or token_id}:{exch or seg} {newdata.get('orderSide')} limitPrice={limit_price}"
+                )
             elif is_stop_market:
                 stop_price = float(newdata.get("stopPrice", 0) or 0)
                 if stop_price > 0:
