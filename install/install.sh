@@ -817,7 +817,7 @@ if [ "$DISABLE_SESSION_EXPIRY" = "true" ]; then
 fi
 
 # Update WebSocket URL for production
-sudo sed -i "s|WEBSOCKET_URL='.*'|WEBSOCKET_URL='wss://$DOMAIN/ws'|g" $OPENALGO_PATH/.env
+sudo sed -i -E "s|^WEBSOCKET_URL\s*=\s*['\"].*['\"]|WEBSOCKET_URL='wss://$DOMAIN/ws'|g" $OPENALGO_PATH/.env
 
 # Enable Remote MCP if the operator opted in. Same-domain mode: /mcp and
 # /oauth/* are served from the same nginx vhost as the dashboard, no

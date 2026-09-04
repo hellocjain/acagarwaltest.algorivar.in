@@ -387,10 +387,8 @@ log_message "\n[Step 3/6] Updating .env file..." "$BLUE"
 sudo sed -i "s|$CURRENT_DOMAIN|$NEW_DOMAIN|g" "$ENV_FILE"
 
 # Explicitly ensure critical variables are correct
-sudo sed -i "s|HOST_SERVER = '.*'|HOST_SERVER = 'https://$NEW_DOMAIN'|g" "$ENV_FILE"
-sudo sed -i "s|WEBSOCKET_URL='.*'|WEBSOCKET_URL='wss://$NEW_DOMAIN/ws'|g" "$ENV_FILE"
-# Handle WEBSOCKET_URL with spaces around =
-sudo sed -i "s|WEBSOCKET_URL = '.*'|WEBSOCKET_URL = 'wss://$NEW_DOMAIN/ws'|g" "$ENV_FILE"
+sudo sed -i -E "s|^HOST_SERVER\s*=\s*['\"].*['\"]|HOST_SERVER = 'https://$NEW_DOMAIN'|g" "$ENV_FILE"
+sudo sed -i -E "s|^WEBSOCKET_URL\s*=\s*['\"].*['\"]|WEBSOCKET_URL='wss://$NEW_DOMAIN/ws'|g" "$ENV_FILE"
 check_status "Failed to update .env file"
 
 # Verify the changes

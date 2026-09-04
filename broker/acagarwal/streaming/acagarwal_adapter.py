@@ -24,6 +24,9 @@ from .acagarwal_mapping import AcagarwalCapabilityRegistry, AcagarwalExchangeMap
 class AcagarwalWebSocketAdapter(BaseBrokerWebSocketAdapter):
     """AC Agarwal Symphony XTS WebSocket adapter for Unified WebSocket Proxy."""
 
+    MAX_SYMBOLS_PER_CONNECTION = 50
+    MAX_CONNECTIONS = 1
+
     def __init__(self):
         super().__init__()
         self.logger = get_logger("acagarwal_websocket")
@@ -120,6 +123,94 @@ class AcagarwalWebSocketAdapter(BaseBrokerWebSocketAdapter):
             return {"status": "success", "actual_depth": depth_level}
         return {"status": "error", "message": "Subscription failed on broker feed"}
 
+    def subscribe_batch(
+        self,
+        symbols_list: List[Dict[str, str]],
+        mode: int = 2,
+        depth_level: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """Subscribe to a batch of symbols at once.
+
+        Uses bulk token lookup and sends chunked batch requests to Symphony XTS.
+        Returns a list of per-symbol result dicts compatible with websocket_proxy.
+        """
+        if not symbols_list:
+            return []
+
+        from database.token_db_enhanced import get_tokens_bulk
+
+        lookup_pairs = []
+        valid_items = []
+        results = []
+
+        for item in symbols_list:
+            sym = item.get("symbol")
+            ex = item.get("exchange")
+            if not sym or not ex:
+                results.append({
+                    "symbol": sym or "",
+                    "exchange": ex or "",
+                    "status": "error",
+                    "message": "Invalid symbol or exchange",
+                })
+                continue
+            lookup_pairs.append((sym, ex))
+            valid_items.append((sym, ex))
+
+        if not lookup_pairs:
+            return results
+
+        tokens = get_tokens_bulk(lookup_pairs)
+
+        instruments = []
+        matched_symbols = []
+
+        for (sym, ex), token in zip(valid_items, tokens):
+            if not token:
+                results.append({
+                    "symbol": sym,
+                    "exchange": ex,
+                    "status": "error",
+                    "message": f"Token not found for {sym} on {ex}",
+                })
+                continue
+
+            exchange_type = AcagarwalExchangeMapper.get_exchange_type(ex)
+            instruments.append({
+                "exchangeSegment": exchange_type,
+                "exchangeInstrumentID": int(token),
+            })
+            matched_symbols.append((sym, ex, token))
+
+        if instruments:
+            success = self.ws_client.subscribe(instruments, mode=mode)
+            with self.lock:
+                for sym, ex, token in matched_symbols:
+                    key = f"{sym}:{ex}:{mode}"
+                    if success:
+                        self.subscriptions[key] = {
+                            "symbol": sym,
+                            "exchange": ex,
+                            "token": token,
+                            "mode": mode,
+                            "depth_level": depth_level,
+                        }
+                        results.append({
+                            "symbol": sym,
+                            "exchange": ex,
+                            "status": "success",
+                            "actual_depth": depth_level,
+                        })
+                    else:
+                        results.append({
+                            "symbol": sym,
+                            "exchange": ex,
+                            "status": "error",
+                            "message": "Subscription failed on broker feed",
+                        })
+
+        return results
+
     def unsubscribe(self, symbol: str, exchange: str, mode: int = 2) -> dict[str, Any]:
         exchange_type = AcagarwalExchangeMapper.get_exchange_type(exchange)
         token = get_token(symbol, exchange)
@@ -138,6 +229,40 @@ class AcagarwalWebSocketAdapter(BaseBrokerWebSocketAdapter):
             self.subscriptions.pop(key, None)
         return {"status": "success"}
 
+    def unsubscribe_batch(
+        self,
+        symbols_list: List[Dict[str, str]],
+        mode: int = 2,
+    ) -> List[Dict[str, Any]]:
+        if not symbols_list:
+            return []
+
+        from database.token_db_enhanced import get_tokens_bulk
+
+        lookup_pairs = [
+            (item.get("symbol"), item.get("exchange"))
+            for item in symbols_list
+            if item.get("symbol") and item.get("exchange")
+        ]
+        tokens = get_tokens_bulk(lookup_pairs)
+
+        instruments = []
+        with self.lock:
+            for (sym, ex), token in zip(lookup_pairs, tokens):
+                if token:
+                    exchange_type = AcagarwalExchangeMapper.get_exchange_type(ex)
+                    instruments.append({
+                        "exchangeSegment": exchange_type,
+                        "exchangeInstrumentID": int(token),
+                    })
+                key = f"{sym}:{ex}:{mode}"
+                self.subscriptions.pop(key, None)
+
+        if instruments:
+            self.ws_client.unsubscribe(instruments, mode=mode)
+
+        return [{"symbol": s[0], "exchange": s[1], "status": "success"} for s in lookup_pairs]
+
     def unsubscribe_all(self):
         with self.lock:
             subs = list(self.subscriptions.values())
@@ -152,14 +277,21 @@ class AcagarwalWebSocketAdapter(BaseBrokerWebSocketAdapter):
     def _on_open(self):
         self.logger.info("AC Agarwal WebSocket stream opened.")
         self.reconnect_attempts = 0
-        # Resubscribe existing subscriptions
+        # Resubscribe existing subscriptions in batches by mode
         with self.lock:
             subs = list(self.subscriptions.values())
-        for s in subs:
-            try:
-                self.subscribe(s["symbol"], s["exchange"], s["mode"], s.get("depth_level", 5))
-            except Exception as e:
-                self.logger.error(f"Error re-subscribing {s}: {e}")
+
+        if subs:
+            by_mode: Dict[int, List[Dict[str, str]]] = {}
+            for s in subs:
+                by_mode.setdefault(s["mode"], []).append(
+                    {"symbol": s["symbol"], "exchange": s["exchange"]}
+                )
+            for m, syms in by_mode.items():
+                try:
+                    self.subscribe_batch(syms, mode=m)
+                except Exception as e:
+                    self.logger.error(f"Error re-subscribing batch for mode {m}: {e}")
 
     def _on_close(self):
         self.logger.info("AC Agarwal WebSocket stream closed.")

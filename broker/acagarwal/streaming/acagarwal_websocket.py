@@ -231,57 +231,90 @@ class AcagarwalWebSocketClient:
         if not self.market_data_token:
             return False
 
+        if not instruments:
+            return True
+
         xts_code = self.MODE_TO_XTS_CODE.get(mode, 1501)
-        payload = {
-            "instruments": instruments,
-            "xtsMessageCode": xts_code,
-        }
         headers = {
             "Content-Type": "application/json",
             "authorization": self.market_data_token,
         }
 
-        try:
-            response = self._http_session.post(
-                self.subscription_url, json=payload, headers=headers, timeout=10
-            )
-            if response.status_code == 200:
-                for inst in instruments:
-                    key = f"{inst.get('exchangeSegment')}_{inst.get('exchangeInstrumentID')}"
-                    self.subscriptions[key] = mode
-                return True
-            return False
-        except Exception as e:
-            self.logger.error(f"Subscription error: {e}")
-            return False
+        any_success = False
+        # XTS supports batch subscriptions up to 50-100 instruments per request
+        batch_size = 50
+        for i in range(0, len(instruments), batch_size):
+            chunk = instruments[i : i + batch_size]
+            payload = {
+                "instruments": chunk,
+                "xtsMessageCode": xts_code,
+            }
+
+            try:
+                response = self._http_session.post(
+                    self.subscription_url, json=payload, headers=headers, timeout=10
+                )
+                if response.status_code == 200:
+                    for inst in chunk:
+                        key = f"{inst.get('exchangeSegment')}_{inst.get('exchangeInstrumentID')}"
+                        self.subscriptions[key] = mode
+                    any_success = True
+                else:
+                    self.logger.warning(
+                        f"AC Agarwal XTS subscription HTTP {response.status_code}: {response.text}"
+                    )
+                    if "Exceeded Instrument Subscription Limit" in response.text:
+                        self.logger.warning(
+                            "Instrument subscription limit reached on AC Agarwal market data feed. "
+                            "Halting additional subscription chunks."
+                        )
+                        break
+            except Exception as e:
+                self.logger.error(f"Subscription error: {e}")
+                break
+
+        return any_success
 
     def unsubscribe(self, instruments: List[Dict], mode: int = 1) -> bool:
         if not self.market_data_token:
             return False
 
+        if not instruments:
+            return True
+
         xts_code = self.MODE_TO_XTS_CODE.get(mode, 1501)
-        payload = {
-            "instruments": instruments,
-            "xtsMessageCode": xts_code,
-        }
         headers = {
             "Content-Type": "application/json",
             "authorization": self.market_data_token,
         }
 
-        try:
-            response = self._http_session.put(
-                self.subscription_url, json=payload, headers=headers, timeout=10
-            )
-            if response.status_code == 200:
-                for inst in instruments:
-                    key = f"{inst.get('exchangeSegment')}_{inst.get('exchangeInstrumentID')}"
-                    self.subscriptions.pop(key, None)
-                return True
-            return False
-        except Exception as e:
-            self.logger.error(f"Unsubscription error: {e}")
-            return False
+        any_success = False
+        batch_size = 50
+        for i in range(0, len(instruments), batch_size):
+            chunk = instruments[i : i + batch_size]
+            payload = {
+                "instruments": chunk,
+                "xtsMessageCode": xts_code,
+            }
+
+            try:
+                response = self._http_session.put(
+                    self.subscription_url, json=payload, headers=headers, timeout=10
+                )
+                if response.status_code == 200:
+                    for inst in chunk:
+                        key = f"{inst.get('exchangeSegment')}_{inst.get('exchangeInstrumentID')}"
+                        self.subscriptions.pop(key, None)
+                    any_success = True
+                else:
+                    self.logger.warning(
+                        f"AC Agarwal XTS unsubscribe HTTP {response.status_code}: {response.text}"
+                    )
+            except Exception as e:
+                self.logger.error(f"Unsubscription error: {e}")
+                break
+
+        return any_success
 
     def close(self):
         self.running = False

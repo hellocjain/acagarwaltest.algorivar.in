@@ -455,6 +455,11 @@ def run_installation_pipeline(config: Dict[str, Any]):
         if domain and use_ssl
         else (f"http://{domain}" if domain else f"http://{diag['public_ip']}:5000")
     )
+    websocket_url_val = (
+        f"wss://{domain}/ws"
+        if domain and use_ssl
+        else (f"ws://{domain}/ws" if domain else "ws://127.0.0.1:8765")
+    )
     mcp_url_val = f"https://{domain}/mcp" if domain and enable_mcp else ""
 
     valid_brokers_str = "acagarwal,fivepaisa,fivepaisaxts,aliceblue,angel,arrow,compositedge,definedge,deltaexchange,dhan,dhan_sandbox,firstock,flattrade,fyers,groww,hdfcsecurities,hdfcsky,ibulls,iifl,iiflcapital,indmoney,jainamxts,kotak,motilal,mstock,nubra,paytm,pocketful,rmoney,samco,shoonya,tradejini,tradesmart,upstox,wisdom,zebu,zerodha"
@@ -479,10 +484,28 @@ def run_installation_pipeline(config: Dict[str, Any]):
             "YOUR_BROKER_MARKET_API_KEY": broker_api_key_market,
             "YOUR_BROKER_MARKET_API_SECRET": broker_api_secret_market,
             "http://127.0.0.1:5000/<broker>/callback": redirect_url,
-            "HOST_SERVER = 'http://127.0.0.1:5000'": f"HOST_SERVER = '{host_server_val}'",
         }
         for placeholder, val in replacements.items():
             env_content = env_content.replace(placeholder, val)
+
+        env_content = re.sub(
+            r"^HOST_SERVER\s*=.*$",
+            f"HOST_SERVER = '{host_server_val}'",
+            env_content,
+            flags=re.MULTILINE,
+        )
+        env_content = re.sub(
+            r"^WEBSOCKET_URL\s*=.*$",
+            f"WEBSOCKET_URL = '{websocket_url_val}'",
+            env_content,
+            flags=re.MULTILINE,
+        )
+        env_content = re.sub(
+            r"^REDIRECT_URL\s*=.*$",
+            f"REDIRECT_URL = '{redirect_url}'",
+            env_content,
+            flags=re.MULTILINE,
+        )
 
         if telegram_token:
             env_content = re.sub(
@@ -525,7 +548,7 @@ FLASK_DEBUG = 'False'
 FLASK_ENV = 'production'
 WEBSOCKET_HOST = '127.0.0.1'
 WEBSOCKET_PORT = '8765'
-WEBSOCKET_URL = 'ws://127.0.0.1:8765'
+WEBSOCKET_URL = '{websocket_url_val}'
 ZMQ_HOST = '127.0.0.1'
 ZMQ_PORT = '5555'
 DATABASE_URL = 'sqlite:///db/openalgo.db'
@@ -644,6 +667,28 @@ server {{
                 f"Notice: Domain {domain} does not resolve to this server IP ({diag['public_ip']}) yet. Running over HTTP; SSL can be enabled after DNS propagates.",
                 "WARN",
             )
+
+    # Reconcile .env with actual SSL status
+    if domain and not _dry_run:
+        actual_proto = "https" if (use_ssl and ssl_acquired) else "http"
+        actual_ws_proto = "wss" if (use_ssl and ssl_acquired) else "ws"
+        actual_host = f"{actual_proto}://{domain}"
+        actual_ws = f"{actual_ws_proto}://{domain}/ws"
+        actual_redirect = f"{actual_proto}://{domain}/{broker}/callback"
+
+        try:
+            if os.path.exists(env_path):
+                with open(env_path, "r") as f:
+                    cur_env = f.read()
+                cur_env = re.sub(r"^HOST_SERVER\s*=.*$", f"HOST_SERVER = '{actual_host}'", cur_env, flags=re.MULTILINE)
+                cur_env = re.sub(r"^WEBSOCKET_URL\s*=.*$", f"WEBSOCKET_URL = '{actual_ws}'", cur_env, flags=re.MULTILINE)
+                cur_env = re.sub(r"^REDIRECT_URL\s*=.*$", f"REDIRECT_URL = '{actual_redirect}'", cur_env, flags=re.MULTILINE)
+                with open(env_path, "w") as f:
+                    f.write(cur_env)
+                os.chmod(env_path, 0o600)
+                stream_log(f"Reconciled .env: HOST_SERVER={actual_host}, WEBSOCKET_URL={actual_ws}", "INFO")
+        except Exception as e:
+            stream_log(f"Notice: Could not reconcile .env SSL state: {e}", "WARN")
 
     # STAGE 7: Systemd Service & Startup
     _install_state["stage"] = 7

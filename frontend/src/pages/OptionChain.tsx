@@ -51,7 +51,6 @@ const STRIKE_COUNTS = [
   { value: 10, label: '10 strikes' },
   { value: 15, label: '15 strikes' },
   { value: 20, label: '20 strikes' },
-  { value: 25, label: '25 strikes' },
 ]
 
 // Format number in lakhs (divide by 100000)

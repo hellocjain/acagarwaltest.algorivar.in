@@ -362,7 +362,7 @@ for ((i=1; i<=INSTANCES; i++)); do
     sudo sed -i "s|ZMQ_PORT='[0-9]*'|ZMQ_PORT='$ZMQ_PORT'|g" "$ENV_FILE"
 
     # 4. Update WebSocket URL for production (secure WebSocket through nginx)
-    sudo sed -i "s|WEBSOCKET_URL='.*'|WEBSOCKET_URL='wss://$DOMAIN/ws'|g" "$ENV_FILE"
+    sudo sed -i -E "s|^WEBSOCKET_URL\s*=\s*['\"].*['\"]|WEBSOCKET_URL='wss://$DOMAIN/ws'|g" "$ENV_FILE"
 
     # 5. Host bindings intentionally left at 127.0.0.1 (the .sample.env default):
     #    nginx on this host reverse-proxies /ws -> 127.0.0.1:WEBSOCKET_PORT, and

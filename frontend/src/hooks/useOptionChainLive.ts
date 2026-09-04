@@ -276,6 +276,13 @@ export function useOptionChainLive(
       }
     }
 
+    // Stay safely within broker subscription limits (e.g. Symphony XTS hard limit of 50 instruments).
+    // Clamp WebSocket subscriptions to at most 49 items (1 underlying + up to 48 option contracts).
+    // All strikes continue to be kept fresh via the active REST polling hook.
+    if (symbols.length > 49) {
+      return symbols.slice(0, 49)
+    }
+
     return symbols
   }, [polledData, optionExchange])
 

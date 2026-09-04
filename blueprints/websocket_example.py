@@ -198,16 +198,26 @@ def api_get_websocket_config():
 
     websocket_url = os.getenv("WEBSOCKET_URL", "ws://localhost:8765")
 
-    # If the current request is HTTPS and the WebSocket URL is WS, upgrade to WSS
-    if request.is_secure and websocket_url.startswith("ws://"):
-        websocket_url = websocket_url.replace("ws://", "wss://")
+    # If accessed remotely (request.host is a domain or non-loopback IP) and the configured
+    # URL points to localhost or 127.0.0.1, automatically derive the public WebSocket URL
+    # through the reverse proxy (/ws endpoint configured in Nginx).
+    req_host = request.host.split(":")[0]
+    is_remote = req_host not in ("localhost", "127.0.0.1", "0.0.0.0")
+    is_https = request.is_secure or request.headers.get("X-Forwarded-Proto") == "https"
+
+    if is_remote and any(h in websocket_url for h in ("localhost", "127.0.0.1")):
+        proto = "wss" if is_https else "ws"
+        websocket_url = f"{proto}://{request.host}/ws"
+        logger.info(f"Derived public WebSocket URL for remote host {request.host}: {websocket_url}")
+    elif is_https and websocket_url.startswith("ws://"):
+        websocket_url = websocket_url.replace("ws://", "wss://", 1)
         logger.info(f"Upgraded WebSocket URL to secure: {websocket_url}")
 
     return jsonify(
         {
             "status": "success",
             "websocket_url": websocket_url,
-            "is_secure": request.is_secure,
+            "is_secure": is_https,
             "original_url": os.getenv("WEBSOCKET_URL", "ws://localhost:8765"),
         }
     ), 200

@@ -319,7 +319,7 @@ if is_xts_broker "$BROKER_NAME"; then
 fi
 
 # Update WebSocket and host configurations
-$SUDO sed -i "s|WEBSOCKET_URL='.*'|WEBSOCKET_URL='wss://$DOMAIN/ws'|g" .env
+$SUDO sed -i -E "s|^WEBSOCKET_URL\s*=\s*['\"].*['\"]|WEBSOCKET_URL='wss://$DOMAIN/ws'|g" .env
 # WEBSOCKET_HOST / FLASK_HOST_IP must be 0.0.0.0 *inside* the container so the
 # Docker port mapping (-p host:container) can route traffic. nginx on the host
 # reverse-proxies /ws and / onto these ports over the Docker bridge.

@@ -138,17 +138,25 @@ class _PooledAdapterWrapper:
                 self._pool = _POOLED_ADAPTERS[pool_key]
                 self.logger.info(f"Reusing existing pool for {pool_key}")
             else:
+                max_symbols = (
+                    getattr(self._adapter_class, "MAX_SYMBOLS_PER_CONNECTION", None)
+                    or MAX_SYMBOLS_PER_WEBSOCKET
+                )
+                max_conns = (
+                    getattr(self._adapter_class, "MAX_CONNECTIONS", None)
+                    or MAX_WEBSOCKET_CONNECTIONS
+                )
                 self._pool = ConnectionPool(
                     adapter_class=self._adapter_class,
                     broker_name=self._broker_name,
                     user_id=user_id,
-                    max_symbols_per_connection=MAX_SYMBOLS_PER_WEBSOCKET,
-                    max_connections=MAX_WEBSOCKET_CONNECTIONS,
+                    max_symbols_per_connection=max_symbols,
+                    max_connections=max_conns,
                 )
                 _POOLED_ADAPTERS[pool_key] = self._pool
                 self.logger.info(
                     f"Created new connection pool for {pool_key}: "
-                    f"max {MAX_SYMBOLS_PER_WEBSOCKET} symbols × {MAX_WEBSOCKET_CONNECTIONS} connections"
+                    f"max {max_symbols} symbols × {max_conns} connections"
                 )
 
             self._user_id = user_id
@@ -186,6 +194,12 @@ class _PooledAdapterWrapper:
         if self._pool:
             return self._pool.subscribe(symbol, exchange, mode, depth_level)
         return {"status": "error", "message": "Not initialized"}
+
+    def subscribe_batch(self, symbols: list, mode: int = 2, depth_level: int = 5):
+        """Subscribe to a batch of symbols"""
+        if self._pool and hasattr(self._pool, "subscribe_batch"):
+            return self._pool.subscribe_batch(symbols, mode, depth_level)
+        return None
 
     def unsubscribe(self, symbol: str, exchange: str, mode: int = 2):
         """Unsubscribe from market data"""

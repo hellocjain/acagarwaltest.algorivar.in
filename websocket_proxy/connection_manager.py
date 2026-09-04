@@ -736,6 +736,141 @@ class ConnectionPool:
                 self.logger.exception(f"Error subscribing to {symbol}.{exchange}: {e}")
                 return {"status": "error", "code": "SUBSCRIPTION_ERROR", "message": str(e)}
 
+    def subscribe_batch(
+        self, symbols: list[dict], mode: int = 2, depth_level: int = 5
+    ) -> list[dict]:
+        """Subscribe to a batch of symbols, leveraging adapter.subscribe_batch if supported."""
+        if not symbols:
+            return []
+
+        results = [None] * len(symbols)
+        to_subscribe_items = []
+
+        with self.lock:
+            allocated_counts = list(self.adapter_symbol_counts)
+
+            for idx, item in enumerate(symbols):
+                symbol = item.get("symbol")
+                exchange = item.get("exchange")
+                if not symbol or not exchange:
+                    results[idx] = {
+                        "symbol": symbol or "",
+                        "exchange": exchange or "",
+                        "status": "error",
+                        "message": "Invalid symbol or exchange",
+                    }
+                    continue
+
+                sub_key = (symbol, exchange, mode)
+                if sub_key in self.subscription_map:
+                    results[idx] = {
+                        "symbol": symbol,
+                        "exchange": exchange,
+                        "status": "success",
+                        "actual_depth": depth_level,
+                        "connection": self.subscription_map[sub_key] + 1,
+                    }
+                    continue
+
+                existing_modes = self._get_existing_modes(symbol, exchange)
+                highest_existing = max(existing_modes.keys()) if existing_modes else 0
+
+                if existing_modes:
+                    adapter_idx = existing_modes[highest_existing]
+                    adapter = self.adapters[adapter_idx]
+                    if mode <= highest_existing:
+                        self.subscription_map[sub_key] = adapter_idx
+                        self.subscription_depths[sub_key] = depth_level
+                        results[idx] = {
+                            "symbol": symbol,
+                            "exchange": exchange,
+                            "status": "success",
+                            "actual_depth": depth_level,
+                            "connection": adapter_idx + 1,
+                        }
+                        continue
+                    else:
+                        # Upgrade: reuses same adapter, does not count as new symbol
+                        to_subscribe_items.append((idx, symbol, exchange, adapter_idx, adapter, True))
+                        continue
+
+                # NEW SYMBOL: find adapter with available capacity accounting for items allocated in this batch
+                target_idx = None
+                for a_idx, count in enumerate(allocated_counts):
+                    if count < self.max_symbols:
+                        target_idx = a_idx
+                        break
+
+                if target_idx is None:
+                    if len(self.adapters) < self.max_connections:
+                        try:
+                            new_adapter = self._create_adapter()
+                            new_adapter.initialize(self.broker_name, self.user_id)
+                            new_adapter.connect()
+                            self.adapters.append(new_adapter)
+                            self.adapter_symbol_counts.append(0)
+                            allocated_counts.append(0)
+                            target_idx = len(self.adapters) - 1
+                        except Exception as e:
+                            results[idx] = {
+                                "symbol": symbol,
+                                "exchange": exchange,
+                                "status": "error",
+                                "message": f"Failed to create new connection: {e}",
+                            }
+                            continue
+                    else:
+                        total_symbols = sum(self.adapter_symbol_counts)
+                        max_cap = self.max_connections * self.max_symbols
+                        results[idx] = {
+                            "symbol": symbol,
+                            "exchange": exchange,
+                            "status": "error",
+                            "message": f"Maximum capacity reached: {self.max_connections} conn × {self.max_symbols} = {max_cap} symbols (current: {total_symbols})",
+                        }
+                        continue
+
+                adapter = self.adapters[target_idx]
+                allocated_counts[target_idx] += 1
+                to_subscribe_items.append((idx, symbol, exchange, target_idx, adapter, False))
+
+            if not to_subscribe_items:
+                return [r for r in results if r is not None]
+
+            # Group by adapter
+            by_adapter: dict[int, tuple[Any, list]] = {}
+            for idx, sym, ex, adapter_idx, adapter, is_upgrade in to_subscribe_items:
+                by_adapter.setdefault(adapter_idx, (adapter, []))[1].append((idx, sym, ex, is_upgrade))
+
+            for adapter_idx, (adapter, items) in by_adapter.items():
+                if hasattr(adapter, "subscribe_batch"):
+                    batch_specs = [{"symbol": s, "exchange": e} for _, s, e, _ in items]
+                    batch_res = adapter.subscribe_batch(batch_specs, mode=mode, depth_level=depth_level)
+                    res_map = {(r.get("symbol"), r.get("exchange")): r for r in batch_res}
+                    for original_idx, sym, ex, is_upgrade in items:
+                        res = res_map.get((sym, ex), {"status": "error", "message": "No response from adapter"})
+                        if res.get("status") == "success":
+                            sub_key = (sym, ex, mode)
+                            self.subscription_map[sub_key] = adapter_idx
+                            self.subscription_depths[sub_key] = depth_level
+                            if not is_upgrade:
+                                self.adapter_symbol_counts[adapter_idx] += 1
+                            res["connection"] = adapter_idx + 1
+                        results[original_idx] = res
+                else:
+                    for original_idx, sym, ex, is_upgrade in items:
+                        res = adapter.subscribe(sym, ex, mode, depth_level)
+                        if res.get("status") == "success":
+                            sub_key = (sym, ex, mode)
+                            self.subscription_map[sub_key] = adapter_idx
+                            self.subscription_depths[sub_key] = depth_level
+                            if not is_upgrade:
+                                self.adapter_symbol_counts[adapter_idx] += 1
+                            res["connection"] = adapter_idx + 1
+                        results[original_idx] = res
+
+        return [r for r in results if r is not None]
+
     def unsubscribe(self, symbol: str, exchange: str, mode: int = 2) -> dict:
         """
         Unsubscribe from market data.

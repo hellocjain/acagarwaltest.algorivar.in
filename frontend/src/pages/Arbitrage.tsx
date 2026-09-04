@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { type ArbitragePair, arbitrageApi } from '@/api/arbitrage'
 import { type BasketOrderItem, tradingApi } from '@/api/trading'
 import { Badge } from '@/components/ui/badge'
@@ -156,7 +157,6 @@ export default function Arbitrage() {
   const { apiKey } = useAuthStore()
 
   const [pairs, setPairs] = useState<ArbitragePair[]>([])
-  const [symbols, setSymbols] = useState<Array<{ symbol: string; exchange: string }>>([])
   const [loading, setLoading] = useState(true)
   const [universeError, setUniverseError] = useState<string | null>(null)
   const [generatedAt, setGeneratedAt] = useState<string>('')
@@ -166,7 +166,6 @@ export default function Arbitrage() {
     isAuthenticated: false,
     isFallbackMode: false,
   })
-  const [allRows, setAllRows] = useState<SpreadRow[]>([])
 
   // Filters
   const [exchangeFilter, setExchangeFilter] = useState('ALL')
@@ -175,13 +174,12 @@ export default function Arbitrage() {
   const [search, setSearch] = useState('')
   const [onlyLiquid, setOnlyLiquid] = useState(false)
 
+  // Pagination
+  const [pageSize, setPageSize] = useState(20)
+  const [currentPage, setCurrentPage] = useState(1)
+
   // Live tick store (ref to avoid re-rendering on every tick)
   const quotesRef = useRef<Map<string, Quote>>(new Map())
-  const pairsRef = useRef<ArbitragePair[]>([])
-
-  useEffect(() => {
-    pairsRef.current = pairs
-  }, [pairs])
 
   const loadUniverse = useCallback(async () => {
     setLoading(true)
@@ -190,7 +188,6 @@ export default function Arbitrage() {
       const res = await arbitrageApi.getUniverse(['NFO', 'MCX'])
       if (res.status === 'success' && res.data) {
         setPairs(res.data.pairs)
-        setSymbols(res.data.symbols)
         setGeneratedAt(res.data.generated_at)
       } else {
         setUniverseError(res.message || 'Failed to load arbitrage universe')
@@ -207,10 +204,54 @@ export default function Arbitrage() {
     loadUniverse()
   }, [loadUniverse])
 
-  // Subscribe to all leg symbols in Depth mode for live bid/ask.
-  // Re-subscribes only when the symbol set changes; managerRef/quotesRef are stable refs.
+  // Filter candidate pairs before pagination
+  const filteredPairs = useMemo(() => {
+    const q = search.trim().toUpperCase()
+    return pairs.filter((p) => {
+      if (exchangeFilter !== 'ALL' && p.exchange !== exchangeFilter) return false
+      if (typeFilter !== 'ALL' && p.type !== typeFilter) return false
+      if (q && !p.underlying.toUpperCase().includes(q)) return false
+      return true
+    })
+  }, [pairs, exchangeFilter, typeFilter, search])
+
+  const totalPages = Math.max(1, Math.ceil(filteredPairs.length / pageSize))
+  const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages)
+
+  // Active page pairs (max pageSize pairs = at most 2 * pageSize symbols)
+  const pagePairs = useMemo(() => {
+    const start = (safeCurrentPage - 1) * pageSize
+    return filteredPairs.slice(start, start + pageSize)
+  }, [filteredPairs, safeCurrentPage, pageSize])
+
+  const pagePairsRef = useRef<ArbitragePair[]>([])
   useEffect(() => {
-    if (symbols.length === 0) return
+    pagePairsRef.current = pagePairs
+  }, [pagePairs])
+
+  // Deduplicated symbols for the current page only (keeps subscriptions <= 50)
+  const pageSymbols = useMemo(() => {
+    const seen = new Set<string>()
+    const syms: Array<{ symbol: string; exchange: string }> = []
+    for (const p of pagePairs) {
+      const nearKey = quoteKey(p.near.symbol, p.near.exchange)
+      if (!seen.has(nearKey)) {
+        seen.add(nearKey)
+        syms.push({ symbol: p.near.symbol, exchange: p.near.exchange })
+      }
+      const farKey = quoteKey(p.far.symbol, p.far.exchange)
+      if (!seen.has(farKey)) {
+        seen.add(farKey)
+        syms.push({ symbol: p.far.symbol, exchange: p.far.exchange })
+      }
+    }
+    return syms
+  }, [pagePairs])
+
+  // Subscribe ONLY to the active page symbols in Depth mode.
+  // When active page changes, previous page symbols are unsubscribed automatically.
+  useEffect(() => {
+    if (pageSymbols.length === 0) return
 
     const manager = managerRef.current
     manager.setAutoReconnect(true)
@@ -225,7 +266,7 @@ export default function Arbitrage() {
     })
 
     const unsubs: Array<() => void> = []
-    for (const { symbol, exchange } of symbols) {
+    for (const { symbol, exchange } of pageSymbols) {
       const key = quoteKey(symbol, exchange)
       const unsub = manager.subscribe(symbol, exchange, 'Depth', (data: SymbolData) => {
         const q = extractQuote(data)
@@ -243,20 +284,15 @@ export default function Arbitrage() {
       stateUnsub()
       unsubs.forEach((u) => u())
     }
-  }, [symbols])
+  }, [pageSymbols])
 
-  // Throttled recompute of the ranked table.
+  // Throttled recompute of the active page rows.
+  const [pageRows, setPageRows] = useState<SpreadRow[]>([])
   useEffect(() => {
     const id = setInterval(() => {
       const now = Date.now()
-      const rows = pairsRef.current.map((p) => computeRow(p, quotesRef.current, now))
-      rows.sort((a, b) => {
-        if (a.spreadPct == null && b.spreadPct == null) return 0
-        if (a.spreadPct == null) return 1
-        if (b.spreadPct == null) return -1
-        return b.spreadPct - a.spreadPct
-      })
-      setAllRows(rows)
+      const rows = pagePairsRef.current.map((p) => computeRow(p, quotesRef.current, now))
+      setPageRows(rows)
     }, REFRESH_MS)
     return () => clearInterval(id)
   }, [])
@@ -265,18 +301,14 @@ export default function Arbitrage() {
 
   const visibleRows = useMemo(() => {
     const min = minSpread.trim() === '' ? null : Number.parseFloat(minSpread)
-    const q = search.trim().toUpperCase()
-    return allRows.filter((r) => {
-      if (exchangeFilter !== 'ALL' && r.pair.exchange !== exchangeFilter) return false
-      if (typeFilter !== 'ALL' && r.pair.type !== typeFilter) return false
+    return pageRows.filter((r) => {
       if (onlyLiquid && !r.liquid) return false
-      if (q && !r.pair.underlying.toUpperCase().includes(q)) return false
       if (min != null && !Number.isNaN(min)) {
         if (r.spreadPct == null || r.spreadPct < min) return false
       }
       return true
     })
-  }, [allRows, exchangeFilter, typeFilter, minSpread, search, onlyLiquid])
+  }, [pageRows, minSpread, onlyLiquid])
 
   // ---- Trade dialog state ----
   const [tradeRow, setTradeRow] = useState<SpreadRow | null>(null)
@@ -444,7 +476,13 @@ export default function Arbitrage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <div className="space-y-1.5">
               <Label>Exchange</Label>
-              <Select value={exchangeFilter} onValueChange={setExchangeFilter}>
+              <Select
+                value={exchangeFilter}
+                onValueChange={(v) => {
+                  setExchangeFilter(v)
+                  setCurrentPage(1)
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -461,7 +499,13 @@ export default function Arbitrage() {
 
             <div className="space-y-1.5">
               <Label>Pair type</Label>
-              <Select value={typeFilter} onValueChange={setTypeFilter}>
+              <Select
+                value={typeFilter}
+                onValueChange={(v) => {
+                  setTypeFilter(v)
+                  setCurrentPage(1)
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -490,7 +534,10 @@ export default function Arbitrage() {
               <Input
                 placeholder="Search e.g. NIFTY"
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => {
+                  setSearch(e.target.value)
+                  setCurrentPage(1)
+                }}
               />
             </div>
 
@@ -506,13 +553,20 @@ export default function Arbitrage() {
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            Opportunities
-            <span className="text-sm font-normal text-muted-foreground">
-              {visibleRows.length} of {pairs.length} pairs
-              {generatedAt ? ` · universe ${new Date(generatedAt).toLocaleTimeString()}` : ''}
-            </span>
-          </CardTitle>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              Opportunities
+              <span className="text-sm font-normal text-muted-foreground">
+                {filteredPairs.length} pairs found
+                {generatedAt ? ` · universe ${new Date(generatedAt).toLocaleTimeString()}` : ''}
+              </span>
+            </CardTitle>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Badge variant="outline" className="font-normal text-xs">
+                Streaming {pageSymbols.length} contracts (broker limit: 50)
+              </Badge>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           {universeError ? (
@@ -522,91 +576,153 @@ export default function Arbitrage() {
               Loading futures universe…
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-10">#</TableHead>
-                  <TableHead>Underlying</TableHead>
-                  <TableHead>Exch</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Near (bid/ask)</TableHead>
-                  <TableHead>Far (bid/ask)</TableHead>
-                  <TableHead className="text-right">Net</TableHead>
-                  <TableHead className="text-right">Spread %</TableHead>
-                  <TableHead>Direction</TableHead>
-                  <TableHead className="text-right">Trade</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {visibleRows.length === 0 ? (
+            <>
+              <Table>
+                <TableHeader>
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
-                      No pairs match the current filters (or no live quotes yet).
-                    </TableCell>
+                    <TableHead className="w-10">#</TableHead>
+                    <TableHead>Underlying</TableHead>
+                    <TableHead>Exch</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Near (bid/ask)</TableHead>
+                    <TableHead>Far (bid/ask)</TableHead>
+                    <TableHead className="text-right">Net</TableHead>
+                    <TableHead className="text-right">Spread %</TableHead>
+                    <TableHead>Direction</TableHead>
+                    <TableHead className="text-right">Trade</TableHead>
                   </TableRow>
-                ) : (
-                  visibleRows.map((row, idx) => {
-                    const pctColor =
-                      row.spreadPct == null
-                        ? ''
-                        : row.spreadPct > 0
-                          ? 'text-emerald-600'
-                          : 'text-red-600'
-                    return (
-                      <TableRow key={row.pair.id}>
-                        <TableCell className="text-muted-foreground">{idx + 1}</TableCell>
-                        <TableCell className="font-medium">
-                          <div className="flex items-center gap-1.5">
-                            <span
-                              className={`inline-block h-2 w-2 rounded-full ${
-                                row.fresh ? 'bg-emerald-500' : 'bg-muted-foreground/40'
-                              }`}
-                              title={row.fresh ? 'Live' : 'Stale / no recent tick'}
-                            />
-                            {row.pair.underlying}
-                          </div>
-                        </TableCell>
-                        <TableCell>{row.pair.exchange}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="font-normal">
-                            {row.pair.type === 'near-next' ? 'Next' : 'Third'}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap">
-                          <div className="text-xs text-muted-foreground">
-                            {row.pair.near.expiry}
-                          </div>
-                          {fmt(row.near?.bid)} / {fmt(row.near?.ask)}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap">
-                          <div className="text-xs text-muted-foreground">{row.pair.far.expiry}</div>
-                          {fmt(row.far?.bid)} / {fmt(row.far?.ask)}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {fmt(row.bestCredit)}
-                        </TableCell>
-                        <TableCell className={`text-right tabular-nums font-semibold ${pctColor}`}>
-                          {row.spreadPct == null ? '—' : `${row.spreadPct.toFixed(2)}%`}
-                        </TableCell>
-                        <TableCell className="text-xs">
-                          {row.direction ? directionLabel(row.direction) : '—'}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={!row.hasData}
-                            onClick={() => openTrade(row)}
-                          >
-                            Trade
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })
-                )}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {visibleRows.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
+                        No pairs match the current filters (or no live quotes yet).
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    visibleRows.map((row, idx) => {
+                      const pctColor =
+                        row.spreadPct == null
+                          ? ''
+                          : row.spreadPct > 0
+                            ? 'text-emerald-600'
+                            : 'text-red-600'
+                      return (
+                        <TableRow key={row.pair.id}>
+                          <TableCell className="text-muted-foreground">
+                            {(safeCurrentPage - 1) * pageSize + idx + 1}
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className={`inline-block h-2 w-2 rounded-full ${
+                                  row.fresh ? 'bg-emerald-500' : 'bg-muted-foreground/40'
+                                }`}
+                                title={row.fresh ? 'Live' : 'Stale / no recent tick'}
+                              />
+                              {row.pair.underlying}
+                            </div>
+                          </TableCell>
+                          <TableCell>{row.pair.exchange}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="font-normal">
+                              {row.pair.type === 'near-next' ? 'Next' : 'Third'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap">
+                            <div className="text-xs text-muted-foreground">
+                              {row.pair.near.expiry}
+                            </div>
+                            {fmt(row.near?.bid)} / {fmt(row.near?.ask)}
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap">
+                            <div className="text-xs text-muted-foreground">{row.pair.far.expiry}</div>
+                            {fmt(row.far?.bid)} / {fmt(row.far?.ask)}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {fmt(row.bestCredit)}
+                          </TableCell>
+                          <TableCell className={`text-right tabular-nums font-semibold ${pctColor}`}>
+                            {row.spreadPct == null ? '—' : `${row.spreadPct.toFixed(2)}%`}
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            {row.direction ? directionLabel(row.direction) : '—'}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={!row.hasData}
+                              onClick={() => openTrade(row)}
+                            >
+                              Trade
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })
+                  )}
+                </TableBody>
+              </Table>
+
+              {/* Pagination controls */}
+              {filteredPairs.length > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t mt-4 text-sm">
+                  <div className="flex items-center gap-2 text-muted-foreground text-xs">
+                    <span>
+                      Showing {(safeCurrentPage - 1) * pageSize + 1}–
+                      {Math.min(safeCurrentPage * pageSize, filteredPairs.length)} of {filteredPairs.length} pairs
+                    </span>
+                    <span>·</span>
+                    <div className="flex items-center gap-1.5">
+                      <span>Per page:</span>
+                      <Select
+                        value={String(pageSize)}
+                        onValueChange={(v) => {
+                          setPageSize(Number(v))
+                          setCurrentPage(1)
+                        }}
+                      >
+                        <SelectTrigger className="h-7 w-16 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="10">10</SelectItem>
+                          <SelectItem value="20">20</SelectItem>
+                          <SelectItem value="25">25</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 px-2 text-xs"
+                      disabled={safeCurrentPage <= 1}
+                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    >
+                      <ChevronLeft className="h-4 w-4 mr-1" />
+                      Previous
+                    </Button>
+                    <span className="text-xs text-muted-foreground px-1">
+                      Page {safeCurrentPage} of {totalPages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 px-2 text-xs"
+                      disabled={safeCurrentPage >= totalPages}
+                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    >
+                      Next
+                      <ChevronRight className="h-4 w-4 ml-1" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       </Card>

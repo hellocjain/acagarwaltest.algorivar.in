@@ -1269,58 +1269,113 @@ class WebSocketProxy:
         subscription_responses = []
         subscription_success = True
 
-        for symbol_info in symbols:
-            symbol = symbol_info.get("symbol")
-            exchange = symbol_info.get("exchange")
+        batch_results = None
+        if hasattr(adapter, "subscribe_batch"):
+            try:
+                batch_results = adapter.subscribe_batch(symbols, mode, depth_level)
+            except Exception as e:
+                logger.warning(f"subscribe_batch raised for {broker_name}: {e}, falling back to per-symbol loop")
+                batch_results = None
 
-            if not symbol or not exchange:
-                continue  # Skip invalid symbols
+        if batch_results is not None:
+            for item_res in batch_results:
+                symbol = item_res.get("symbol")
+                exchange = item_res.get("exchange")
+                if item_res.get("status") == "success":
+                    subscription_info = {
+                        "symbol": symbol,
+                        "exchange": exchange,
+                        "mode": mode,
+                        "depth_level": depth_level,
+                        "broker": broker_name,
+                    }
+                    if client_id in self.subscriptions:
+                        self.subscriptions[client_id].add(json.dumps(subscription_info))
+                    else:
+                        self.subscriptions[client_id] = {json.dumps(subscription_info)}
 
-            # Subscribe to market data
-            response = adapter.subscribe(symbol, exchange, mode, depth_level)
+                    sub_key = (symbol, exchange, mode)
+                    self.subscription_index[sub_key].add(client_id)
 
-            if response.get("status") == "success":
-                # Store the subscription
-                subscription_info = {
-                    "symbol": symbol,
-                    "exchange": exchange,
-                    "mode": mode,
-                    "depth_level": depth_level,
-                    "broker": broker_name,
-                }
-
-                if client_id in self.subscriptions:
-                    self.subscriptions[client_id].add(json.dumps(subscription_info))
+                    subscription_responses.append(
+                        {
+                            "symbol": symbol,
+                            "exchange": exchange,
+                            "status": "success",
+                            "mode": mode_str,
+                            "depth": item_res.get("actual_depth", depth_level),
+                            "broker": broker_name,
+                        }
+                    )
                 else:
-                    self.subscriptions[client_id] = {json.dumps(subscription_info)}
+                    subscription_success = False
+                    subscription_responses.append(
+                        {
+                            "symbol": symbol,
+                            "exchange": exchange,
+                            "status": "error",
+                            "message": item_res.get("message", "Subscription failed"),
+                            "broker": broker_name,
+                        }
+                    )
+        else:
+            processed_count = 0
+            for symbol_info in symbols:
+                symbol = symbol_info.get("symbol")
+                exchange = symbol_info.get("exchange")
 
-                # OPTIMIZATION: Update subscription index for O(1) lookup
-                sub_key = (symbol, exchange, mode)
-                self.subscription_index[sub_key].add(client_id)
+                if not symbol or not exchange:
+                    continue  # Skip invalid symbols
 
-                # Add to successful subscriptions
-                subscription_responses.append(
-                    {
+                # Subscribe to market data
+                response = adapter.subscribe(symbol, exchange, mode, depth_level)
+
+                if response.get("status") == "success":
+                    # Store the subscription
+                    subscription_info = {
                         "symbol": symbol,
                         "exchange": exchange,
-                        "status": "success",
-                        "mode": mode_str,
-                        "depth": response.get("actual_depth", depth_level),
+                        "mode": mode,
+                        "depth_level": depth_level,
                         "broker": broker_name,
                     }
-                )
-            else:
-                subscription_success = False
-                # Add to failed subscriptions
-                subscription_responses.append(
-                    {
-                        "symbol": symbol,
-                        "exchange": exchange,
-                        "status": "error",
-                        "message": response.get("message", "Subscription failed"),
-                        "broker": broker_name,
-                    }
-                )
+
+                    if client_id in self.subscriptions:
+                        self.subscriptions[client_id].add(json.dumps(subscription_info))
+                    else:
+                        self.subscriptions[client_id] = {json.dumps(subscription_info)}
+
+                    # OPTIMIZATION: Update subscription index for O(1) lookup
+                    sub_key = (symbol, exchange, mode)
+                    self.subscription_index[sub_key].add(client_id)
+
+                    # Add to successful subscriptions
+                    subscription_responses.append(
+                        {
+                            "symbol": symbol,
+                            "exchange": exchange,
+                            "status": "success",
+                            "mode": mode_str,
+                            "depth": response.get("actual_depth", depth_level),
+                            "broker": broker_name,
+                        }
+                    )
+                else:
+                    subscription_success = False
+                    # Add to failed subscriptions
+                    subscription_responses.append(
+                        {
+                            "symbol": symbol,
+                            "exchange": exchange,
+                            "status": "error",
+                            "message": response.get("message", "Subscription failed"),
+                            "broker": broker_name,
+                        }
+                    )
+
+                processed_count += 1
+                if processed_count % 16 == 0:
+                    await aio.sleep(0)
 
         # Send combined response
         response = {

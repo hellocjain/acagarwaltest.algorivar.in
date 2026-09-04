@@ -99,10 +99,11 @@ export function useLivePrice<T extends PriceableItem>(
   // Track last fetch time for visibility-aware refresh
   const lastFetchRef = useRef<number>(Date.now())
 
-  // Extract symbols for WebSocket subscription
+  // Extract symbols for WebSocket subscription (capped to 45 to protect broker subscription limits;
+  // all items are continuously polled and refreshed via fetchMultiQuotes)
   const symbols = useMemo(
     () =>
-      items.map((item) => ({
+      items.slice(0, 45).map((item) => ({
         symbol: item.symbol,
         exchange: item.exchange,
       })),

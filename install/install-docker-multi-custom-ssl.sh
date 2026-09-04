@@ -805,7 +805,7 @@ for i in "${!CONF_DOMAINS[@]}"; do
         
         # Only update connectivity settings if needed (in case domain changed)
         # These are safe to update without breaking authentication
-        sed -i "s|WEBSOCKET_URL='.*'|WEBSOCKET_URL='wss://$DOMAIN/ws'|g" "$ENV_FILE"
+        sed -i -E "s|^WEBSOCKET_URL\s*=\s*['\"].*['\"]|WEBSOCKET_URL='wss://$DOMAIN/ws'|g" "$ENV_FILE"
         
         # CORS: Add domain if not already present (preserves custom domains like chart.domain.com)
         # NOTE: Flask-CORS expects comma-separated origins (see cors.py line 25)
@@ -870,7 +870,7 @@ for i in "${!CONF_DOMAINS[@]}"; do
         fi
         
         # Connectivity
-        sed -i "s|WEBSOCKET_URL='.*'|WEBSOCKET_URL='wss://$DOMAIN/ws'|g" "$ENV_FILE"
+        sed -i -E "s|^WEBSOCKET_URL\s*=\s*['\"].*['\"]|WEBSOCKET_URL='wss://$DOMAIN/ws'|g" "$ENV_FILE"
         # WEBSOCKET_HOST / FLASK_HOST_IP bind to 0.0.0.0 inside the container so
         # the Docker port mapping can route traffic from the host's nginx.
         sed -i "s|WEBSOCKET_HOST='127.0.0.1'|WEBSOCKET_HOST='0.0.0.0'|g" "$ENV_FILE"
