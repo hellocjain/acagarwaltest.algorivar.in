@@ -121,14 +121,18 @@ def get_broker_config():
     broker_name is always returned (needed to display the broker login button).
     broker_api_key and redirect_url are only returned when authenticated.
     """
-    REDIRECT_URL = os.getenv("REDIRECT_URL")
+    REDIRECT_URL = os.getenv("REDIRECT_URL") or ""
 
     # Extract broker name from redirect URL
     match = re.search(r"/([^/]+)/callback$", REDIRECT_URL)
     broker_name = match.group(1) if match else None
 
-    if not broker_name:
-        return jsonify({"status": "error", "message": "Broker not configured"}), 500
+    if not broker_name or broker_name == "<broker>":
+        broker_name = "acagarwal"
+        if "<broker>" in REDIRECT_URL:
+            REDIRECT_URL = REDIRECT_URL.replace("<broker>", broker_name)
+        elif not REDIRECT_URL:
+            REDIRECT_URL = f"http://127.0.0.1:5000/{broker_name}/callback"
 
     # Return full config only for authenticated users
     if "user" in session:

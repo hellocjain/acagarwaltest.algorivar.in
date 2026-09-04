@@ -409,9 +409,9 @@ def run_installation_pipeline(config: Dict[str, Any]):
         stream_log("Astral uv direct installer fallback to snap", "WARN")
         execute_cmd("snap install astral-uv --classic || true", "Installing uv via snap")
 
-    # STAGE 3: Clone / Setup OpenAlgo
+    # STAGE 3: Clone / Setup AC Agarwal Algo
     _install_state["stage"] = 3
-    _install_state["message"] = f"Cloning OpenAlgo repository from {repo_url} ({repo_branch})..."
+    _install_state["message"] = f"Cloning AC Agarwal Algo repository from {repo_url} ({repo_branch})..."
     if not _dry_run:
         os.makedirs("/var/python", exist_ok=True)
 
@@ -421,9 +421,9 @@ def run_installation_pipeline(config: Dict[str, Any]):
     else:
         clone_cmd = f"git clone -b {repo_branch} {repo_url} {INSTALL_DIR}"
 
-    if not execute_cmd(clone_cmd, f"Cloning OpenAlgo from {repo_url}"):
+    if not execute_cmd(clone_cmd, f"Cloning AC Agarwal Algo from {repo_url}"):
         _install_state["status"] = "error"
-        _install_state["error"] = f"Failed to clone OpenAlgo repo into {INSTALL_DIR}."
+        _install_state["error"] = f"Failed to clone repository into {INSTALL_DIR}."
         return
 
     # Create db and logs directories
@@ -444,21 +444,22 @@ def run_installation_pipeline(config: Dict[str, Any]):
     _install_state["stage"] = 5
     _install_state["message"] = "Generating production configuration .env..."
 
+    target_host = domain or diag.get("public_ip", "127.0.0.1")
     redirect_url = (
         f"https://{domain}/{broker}/callback"
         if domain and use_ssl
-        else f"http://{domain or diag['public_ip']}:5000/{broker}/callback"
+        else f"http://{target_host}/{broker}/callback"
     )
 
     host_server_val = (
         f"https://{domain}"
         if domain and use_ssl
-        else (f"http://{domain}" if domain else f"http://{diag['public_ip']}:5000")
+        else f"http://{target_host}"
     )
     websocket_url_val = (
         f"wss://{domain}/ws"
         if domain and use_ssl
-        else (f"ws://{domain}/ws" if domain else "ws://127.0.0.1:8765")
+        else f"ws://{target_host}/ws"
     )
     mcp_url_val = f"https://{domain}/mcp" if domain and enable_mcp else ""
 
@@ -530,7 +531,7 @@ def run_installation_pipeline(config: Dict[str, Any]):
                     env_content,
                 )
     else:
-        env_content = f"""# OpenAlgo Production Environment Configuration
+        env_content = f"""# AC Agarwal Algo Production Environment Configuration
 ENV_CONFIG_VERSION = '1.0.7'
 BROKER_API_KEY = '{broker_api_key}'
 BROKER_API_SECRET = '{broker_api_secret}'
@@ -580,7 +581,7 @@ MCP_PUBLIC_URL = '{mcp_url_val}'
     _install_state["message"] = "Configuring hardened Nginx reverse proxy and SSL..."
 
     server_name = domain if domain else "_"
-    nginx_conf = f"""# OpenAlgo Production Nginx VirtualHost
+    nginx_conf = f"""# AC Agarwal Algo Production Nginx VirtualHost
 server {{
     listen 80;
     listen [::]:80;

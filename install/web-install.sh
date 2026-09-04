@@ -17,7 +17,7 @@ NC='\033[0m' # No Color
 export OPENALGO_REPO_URL="${OPENALGO_REPO_URL:-https://github.com/hellocjain/acagarwaltest.algorivar.in.git}"
 
 echo -e "${CYAN}================================================================${NC}"
-echo -e "${GREEN}          🚀 OpenAlgo One-Click Web Installer Launcher${NC}"
+echo -e "${GREEN}       🚀 AC Agarwal Algo One-Click Web Installer Launcher${NC}"
 echo -e "${CYAN}================================================================${NC}"
 
 # Check for root / sudo
@@ -76,8 +76,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -f "$SCRIPT_DIR/web_installer.py" ]; then
     cp "$SCRIPT_DIR/web_installer.py" "$INSTALL_TMP/web_installer.py"
 else
-    echo -e "${YELLOW}[3/3] Downloading latest OpenAlgo Web Setup Wizard...${NC}"
-    RAW_BASE="https://raw.githubusercontent.com/marketcalls/openalgo/main"
+    echo -e "${YELLOW}[3/3] Downloading latest AC Agarwal Algo Web Setup Wizard...${NC}"
+    RAW_BASE="https://raw.githubusercontent.com/hellocjain/acagarwaltest.algorivar.in/main"
     if [ -n "$OPENALGO_REPO_URL" ]; then
         # If custom GitHub URL, convert https://github.com/USER/REPO.git -> https://raw.githubusercontent.com/USER/REPO/main
         CLEAN_REPO=$(echo "$OPENALGO_REPO_URL" | sed -e 's|https://github.com/||' -e 's|\.git$||')
@@ -85,12 +85,12 @@ else
     fi
     TS=$(date +%s)
     curl -sSL -H "Cache-Control: no-cache" -H "Pragma: no-cache" "${RAW_BASE}/install/web_installer.py?v=${TS}" -o "$INSTALL_TMP/web_installer.py" || \
-    curl -sSL -H "Cache-Control: no-cache" -H "Pragma: no-cache" "https://raw.githubusercontent.com/marketcalls/openalgo/main/install/web_installer.py?v=${TS}" -o "$INSTALL_TMP/web_installer.py"
+    curl -sSL -H "Cache-Control: no-cache" -H "Pragma: no-cache" "https://raw.githubusercontent.com/hellocjain/acagarwaltest.algorivar.in/main/install/web_installer.py?v=${TS}" -o "$INSTALL_TMP/web_installer.py"
 fi
 
 chmod +x "$INSTALL_TMP/web_installer.py"
 
 # Start the Web Installer Server
-echo -e "${GREEN}Starting OpenAlgo Web Setup Wizard...${NC}"
+echo -e "${GREEN}Starting AC Agarwal Algo Web Setup Wizard...${NC}"
 cd "$INSTALL_TMP"
 exec python3 "$INSTALL_TMP/web_installer.py" "$@"

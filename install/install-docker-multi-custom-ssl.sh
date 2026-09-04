@@ -164,7 +164,7 @@ fi
 log "\n=== Configuration ===" "$BLUE"
 
 # 0. Git Repository Selection
-DEFAULT_REPO="https://github.com/marketcalls/openalgo.git"
+DEFAULT_REPO="https://github.com/hellocjain/acagarwaltest.algorivar.in.git"
 read -p "Enter Git Repository URL [Default: $DEFAULT_REPO]: " REPO_URL
 REPO_URL=${REPO_URL:-$DEFAULT_REPO}
 log "Using Repository: $REPO_URL" "$GREEN"
@@ -324,7 +324,8 @@ for DOMAIN in "${DOMAINS_INPUT[@]}"; do
 
     # Broker
     while true; do
-        read -p "Enter BROKER for $DOMAIN: " BROKER
+        read -p "Enter BROKER for $DOMAIN [default: acagarwal]: " BROKER
+        BROKER="${BROKER:-acagarwal}"
         if validate_broker "$BROKER"; then
             CONF_BROKERS+=("$BROKER")
             break

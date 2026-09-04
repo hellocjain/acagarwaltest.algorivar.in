@@ -118,7 +118,8 @@ while true; do
     echo "indmoney, jainamxts, kotak, motilal, mstock, nubra, paytm, pocketful,"
     echo "rmoney, samco, shoonya, tradejini, tradesmart, upstox, wisdom, zebu, zerodha,"
     echo ""
-    read -p "Enter your broker name: " BROKER_NAME
+    read -p "Enter your broker name [default: acagarwal]: " BROKER_NAME
+    BROKER_NAME="${BROKER_NAME:-acagarwal}"
     if validate_broker "$BROKER_NAME"; then
         break
     else
@@ -256,8 +257,9 @@ fi
 # branch -- which keeps `git reset --hard HEAD~n`, tag checkouts and
 # branch switching working. Nearly all of that 280 MB is superseded
 # frontend/dist bundles that a server never reads. A host without filter
-# support just full-clones, so this is never worse than no flag at all.
-$SUDO git clone --filter=blob:none https://github.com/marketcalls/openalgo.git $INSTALL_PATH
+DEFAULT_REPO="https://github.com/hellocjain/acagarwaltest.algorivar.in.git"
+REPO_URL="${OPENALGO_REPO_URL:-$DEFAULT_REPO}"
+$SUDO git clone --filter=blob:none "$REPO_URL" $INSTALL_PATH
 check_status "Git clone failed"
 
 cd $INSTALL_PATH

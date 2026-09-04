@@ -369,7 +369,8 @@ while true; do
 
     log_message "\nValid brokers: acagarwal,fivepaisa,fivepaisaxts,aliceblue,angel,arrow,compositedge,definedge,deltaexchange,dhan,dhan_sandbox,firstock,flattrade,fyers,groww,hdfcsecurities,hdfcsky,ibulls,iifl,iiflcapital,indmoney,jainamxts,kotak,motilal,mstock,nubra,paytm,pocketful,rmoney,samco,shoonya,tradejini,tradesmart,upstox,wisdom,zebu,zerodha" "$BLUE"
 
-    read -p "Enter your broker name: " BROKER_NAME
+    read -p "Enter your broker name [default: acagarwal]: " BROKER_NAME
+    BROKER_NAME="${BROKER_NAME:-acagarwal}"
     if validate_broker "$BROKER_NAME"; then
         break
     else
@@ -732,9 +733,10 @@ log_message "\nCloning OpenAlgo repository..." "$BLUE"
 # branch -- which keeps `git reset --hard HEAD~n`, tag checkouts and
 # branch switching working. Nearly all of that 280 MB is superseded
 # frontend/dist bundles that a server never reads. A host without filter
-# support just full-clones, so this is never worse than no flag at all.
-sudo git clone --filter=blob:none https://github.com/marketcalls/openalgo.git $OPENALGO_PATH
-check_status "Failed to clone OpenAlgo repository"
+DEFAULT_REPO="https://github.com/hellocjain/acagarwaltest.algorivar.in.git"
+REPO_URL="${OPENALGO_REPO_URL:-$DEFAULT_REPO}"
+sudo git clone --filter=blob:none "$REPO_URL" $OPENALGO_PATH
+check_status "Failed to clone AC Agarwal Algo repository"
 
 # Create virtual environment using uv
 log_message "\nSetting up Python virtual environment with uv..." "$BLUE"

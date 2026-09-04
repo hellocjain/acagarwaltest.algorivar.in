@@ -114,7 +114,7 @@ log_message "Setting up $INSTANCES OpenAlgo instances" "$GREEN"
 
 # Base configuration
 BASE_DIR="/var/python/openalgo-flask"
-REPO_URL="https://github.com/marketcalls/openalgo.git"
+REPO_URL="${OPENALGO_REPO_URL:-https://github.com/hellocjain/acagarwaltest.algorivar.in.git}"
 FLASK_PORT_BASE=5000
 WS_PORT_BASE=8765
 ZMQ_PORT_BASE=5555
@@ -154,7 +154,8 @@ for ((i=1; i<=INSTANCES; i++)); do
     # Get broker
     while true; do
         log_message "\nValid brokers: acagarwal,fivepaisa,fivepaisaxts,aliceblue,angel,arrow,compositedge,definedge,deltaexchange,dhan,dhan_sandbox,firstock,flattrade,fyers,groww,hdfcsecurities,hdfcsky,ibulls,iifl,iiflcapital,indmoney,jainamxts,kotak,motilal,mstock,nubra,paytm,pocketful,rmoney,samco,shoonya,tradejini,tradesmart,upstox,wisdom,zebu,zerodha" "$BLUE"
-        read -p "Enter broker name for instance $i: " broker
+        read -p "Enter broker name for instance $i [default: acagarwal]: " broker
+        broker="${broker:-acagarwal}"
         if validate_broker "$broker"; then
             BROKERS+=("$broker")
             break
