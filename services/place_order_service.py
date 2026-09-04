@@ -5,7 +5,6 @@ from typing import Any, Dict, Optional, Tuple
 from database.auth_db import get_auth_token_broker
 from database.settings_db import get_analyze_mode
 from events import AnalyzerErrorEvent, OrderFailedEvent, OrderPlacedEvent
-from restx_api.schemas import OrderSchema
 from utils.constants import (
     REQUIRED_ORDER_FIELDS,
     VALID_ACTIONS,
@@ -19,8 +18,16 @@ from utils.logging import get_logger
 # Initialize logger
 logger = get_logger(__name__)
 
-# Initialize schema
-order_schema = OrderSchema()
+_order_schema = None
+
+
+def _get_order_schema():
+    global _order_schema
+    if _order_schema is None:
+        from restx_api.schemas import OrderSchema
+
+        _order_schema = OrderSchema()
+    return _order_schema
 
 
 def import_broker_module(broker_name: str) -> Any | None:
@@ -110,7 +117,7 @@ def validate_order_data(data: dict[str, Any]) -> tuple[bool, dict[str, Any] | No
 
     # Validate and deserialize input
     try:
-        order_data = order_schema.load(data)
+        order_data = _get_order_schema().load(data)
         return True, order_data, None
     except Exception as err:
         return False, None, str(err)
