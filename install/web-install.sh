@@ -29,11 +29,13 @@ fi
 
 # Check and automatically create 2GB Swap if total swap < 2GB
 SWAP_TOTAL_KB=$(grep SwapTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || echo 0)
-if [ "$SWAP_TOTAL_KB" -lt 2000000 ] && [ ! -f /swapfile ]; then
-    echo -e "${YELLOW}Allocating 2GB swap space to prevent memory issues...${NC}"
-    (fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none) && \
-    chmod 600 /swapfile && \
-    mkswap /swapfile >/dev/null 2>&1 && \
+if [ "$SWAP_TOTAL_KB" -lt 2000000 ]; then
+    if [ ! -f /swapfile ]; then
+        echo -e "${YELLOW}Allocating 2GB swap space to prevent memory issues...${NC}"
+        (fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none) && \
+        chmod 600 /swapfile && \
+        mkswap /swapfile >/dev/null 2>&1
+    fi
     swapon /swapfile >/dev/null 2>&1 || true
     grep -q '/swapfile' /etc/fstab 2>/dev/null || echo '/swapfile none swap sw 0 0' >> /etc/fstab
     sysctl vm.swappiness=10 >/dev/null 2>&1 || true
@@ -44,7 +46,7 @@ echo -e "${YELLOW}[1/3] Checking base prerequisites...${NC}"
 if command -v apt-get >/dev/null 2>&1; then
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq >/dev/null 2>&1 || true
-    apt-get install -y -qq python3 curl ufw git >/dev/null 2>&1 || true
+    apt-get install -y -qq python3 curl ufw git psmisc >/dev/null 2>&1 || true
 elif command -v dnf >/dev/null 2>&1; then
     dnf install -y -q python3 curl git >/dev/null 2>&1 || true
 elif command -v yum >/dev/null 2>&1; then
@@ -84,8 +86,14 @@ else
         RAW_BASE="https://raw.githubusercontent.com/${CLEAN_REPO}/main"
     fi
     TS=$(date +%s)
-    curl -sSL -H "Cache-Control: no-cache" -H "Pragma: no-cache" "${RAW_BASE}/install/web_installer.py?v=${TS}" -o "$INSTALL_TMP/web_installer.py" || \
-    curl -sSL -H "Cache-Control: no-cache" -H "Pragma: no-cache" "https://raw.githubusercontent.com/hellocjain/acagarwaltest.algorivar.in/main/install/web_installer.py?v=${TS}" -o "$INSTALL_TMP/web_installer.py"
+    curl -fsSL -H "Cache-Control: no-cache" -H "Pragma: no-cache" "${RAW_BASE}/install/web_installer.py?v=${TS}" -o "$INSTALL_TMP/web_installer.py" || \
+    curl -fsSL -H "Cache-Control: no-cache" -H "Pragma: no-cache" "https://raw.githubusercontent.com/hellocjain/acagarwaltest.algorivar.in/main/install/web_installer.py?v=${TS}" -o "$INSTALL_TMP/web_installer.py"
+fi
+
+if [ ! -s "$INSTALL_TMP/web_installer.py" ]; then
+    echo -e "${RED}Error: Failed to download web_installer.py or file is empty.${NC}"
+    echo -e "${YELLOW}Please check internet connectivity and GitHub access.${NC}"
+    exit 1
 fi
 
 chmod +x "$INSTALL_TMP/web_installer.py"

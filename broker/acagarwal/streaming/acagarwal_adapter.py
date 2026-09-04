@@ -52,13 +52,13 @@ class AcagarwalWebSocketAdapter(BaseBrokerWebSocketAdapter):
         if not auth_data:
             auth_token = get_auth_token(user_id, bypass_cache=True)
             feed_token = get_feed_token(user_id)
-            api_key = os.getenv("BROKER_API_KEY_MARKET", os.getenv("BROKER_API_KEY"))
-            api_secret = os.getenv("BROKER_API_SECRET_MARKET", os.getenv("BROKER_API_SECRET"))
+            api_key = os.getenv("BROKER_API_KEY_MARKET") or os.getenv("BROKER_API_KEY")
+            api_secret = os.getenv("BROKER_API_SECRET_MARKET") or os.getenv("BROKER_API_SECRET")
         else:
             auth_token = auth_data.get("auth_token")
             feed_token = auth_data.get("feed_token")
-            api_key = auth_data.get("api_key", os.getenv("BROKER_API_KEY_MARKET", os.getenv("BROKER_API_KEY")))
-            api_secret = auth_data.get("api_secret", os.getenv("BROKER_API_SECRET_MARKET", os.getenv("BROKER_API_SECRET")))
+            api_key = auth_data.get("api_key") or os.getenv("BROKER_API_KEY_MARKET") or os.getenv("BROKER_API_KEY")
+            api_secret = auth_data.get("api_secret") or os.getenv("BROKER_API_SECRET_MARKET") or os.getenv("BROKER_API_SECRET")
 
         if not api_key or not api_secret:
             raise ValueError("Missing AC Agarwal XTS API credentials in environment variables")

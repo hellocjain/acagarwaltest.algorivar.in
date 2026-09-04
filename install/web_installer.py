@@ -351,13 +351,15 @@ def run_installation_pipeline(config: Dict[str, Any]):
     repo_url = config.get("repo_url", "").strip() or REPO_URL
     repo_branch = config.get("repo_branch", "").strip() or "main"
 
+    if broker in XTS_BROKERS:
+        if not broker_api_key_market and broker_api_key:
+            broker_api_key_market = broker_api_key
+        if not broker_api_secret_market and broker_api_secret:
+            broker_api_secret_market = broker_api_secret
+
     app_key = config.get("app_key") or secrets.token_hex(32)
     api_key_pepper = config.get("api_key_pepper") or secrets.token_hex(32)
-    import base64
-
-    fernet_salt = config.get("fernet_salt") or base64.urlsafe_b64encode(
-        secrets.token_bytes(16)
-    ).decode("utf-8")
+    fernet_salt = config.get("fernet_salt") or secrets.token_hex(32)
 
     stream_log(f"Git Repository: {repo_url} (Branch: {repo_branch})", "CONFIG")
     stream_log(f"Target Domain: {domain or 'IP-only'}", "CONFIG")
@@ -601,15 +603,6 @@ server {{
     add_header X-Content-Type-Options nosniff;
     add_header X-XSS-Protection "1; mode=block";
 
-    location / {{
-        proxy_pass http://127.0.0.1:5000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 120s;
-    }}
-
     location = /ws {{
         proxy_pass http://127.0.0.1:8765;
         proxy_http_version 1.1;
@@ -632,6 +625,35 @@ server {{
         proxy_read_timeout 86400s;
         proxy_send_timeout 86400s;
         proxy_buffering off;
+    }}
+
+    location /socket.io/ {{
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+        proxy_buffering off;
+    }}
+
+    location / {{
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;
+        proxy_connect_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_buffer_size 128k;
+        proxy_buffers 4 256k;
+        proxy_busy_buffers_size 256k;
     }}
 }}
 """
@@ -1489,7 +1511,17 @@ def start_server(port: int = DEFAULT_PORT):
     pub_ip = get_public_ip()
 
     server_address = ("", port)
-    httpd = socketserver.TCPServer(server_address, WebInstallerHTTPHandler)
+    socketserver.TCPServer.allow_reuse_address = True
+    try:
+        httpd = socketserver.TCPServer(server_address, WebInstallerHTTPHandler)
+    except OSError as e:
+        if e.errno in (98, 48):  # Address already in use
+            print(f"[Notice] Port {port} is occupied. Clearing lingering installer process...")
+            subprocess.run(["fuser", "-k", f"{port}/tcp"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(1.0)
+            httpd = socketserver.TCPServer(server_address, WebInstallerHTTPHandler)
+        else:
+            raise e
 
     print("\n" + "=" * 65)
     print("        🚀 AC AGARWAL ALGO ONE-CLICK SERVER INSTALLER WIZARD")

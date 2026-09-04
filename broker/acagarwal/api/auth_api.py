@@ -74,8 +74,8 @@ def get_feed_token():
         tuple: (feed_token, user_id, error_message)
     """
     try:
-        BROKER_API_KEY_MARKET = os.getenv("BROKER_API_KEY_MARKET", os.getenv("BROKER_API_KEY"))
-        BROKER_API_SECRET_MARKET = os.getenv("BROKER_API_SECRET_MARKET", os.getenv("BROKER_API_SECRET"))
+        BROKER_API_KEY_MARKET = os.getenv("BROKER_API_KEY_MARKET") or os.getenv("BROKER_API_KEY")
+        BROKER_API_SECRET_MARKET = os.getenv("BROKER_API_SECRET_MARKET") or os.getenv("BROKER_API_SECRET")
 
         if not BROKER_API_KEY_MARKET or not BROKER_API_SECRET_MARKET:
             return None, None, "Market data credentials not configured"
