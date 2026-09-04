@@ -204,8 +204,8 @@ export default function Dashboard() {
   const quickAccessCards = [
     {
       href: '/search',
-      label: 'OpenAlgo Symbols',
-      description: 'Universal symbology across brokers',
+      label: 'AC Agarwal Symbols',
+      description: 'Universal symbology across instruments',
       icon: Search,
       gradient: 'from-primary/10 to-primary/5 hover:from-primary/20 hover:to-primary/10',
       iconBg: 'bg-primary/20',
@@ -224,7 +224,7 @@ export default function Dashboard() {
       borderColor: 'border-violet-500/20 hover:border-violet-500/40',
     },
     {
-      href: 'https://docs.openalgo.in',
+      href: 'https://acagarwal.com',
       label: 'Documentation',
       description: 'Tutorials, API docs & features',
       icon: BookOpen,
@@ -245,9 +245,9 @@ export default function Dashboard() {
       borderColor: 'border-green-500/20 hover:border-green-500/40',
     },
     {
-      href: 'https://www.openalgo.in/learn',
-      label: 'OpenVarsity',
-      description: 'Learn algo trading with OpenAlgo',
+      href: 'https://board.acagarwal.com',
+      label: 'Client Portal',
+      description: 'AC Agarwal backoffice & accounts',
       icon: GraduationCap,
       gradient: 'from-blue-500/10 to-blue-500/5 hover:from-blue-500/20 hover:to-blue-500/10',
       iconBg: 'bg-blue-500/20',

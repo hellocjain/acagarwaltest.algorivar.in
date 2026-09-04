@@ -7,7 +7,7 @@ BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# OpenAlgo Update Banner
+# AC Agarwal Algo Update Banner
 echo -e "${BLUE}"
 echo "  ██████╗ ██████╗ ███████╗███╗   ██╗ █████╗ ██╗      ██████╗  ██████╗ "
 echo " ██╔═══██╗██╔══██╗██╔════╝████╗  ██║██╔══██╗██║     ██╔════╝ ██╔═══██╗"
@@ -18,7 +18,7 @@ echo "  ╚═════╝ ╚═╝     ╚══════╝╚═╝  �
 echo "                          UPDATE  SCRIPT                                "
 echo -e "${NC}"
 
-# OpenAlgo Update Script
+# AC Agarwal Algo Update Script
 # Updates an existing OpenAlgo installation to the latest version using the UV method.
 # Supports both server deployments (installed via install.sh) and local development setups.
 

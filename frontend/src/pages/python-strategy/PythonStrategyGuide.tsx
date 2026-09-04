@@ -302,7 +302,7 @@ export default function PythonStrategyGuide() {
       <div className="space-y-2">
         <h1 className="text-2xl font-bold tracking-tight">Python Strategy Guide</h1>
         <p className="text-muted-foreground">
-          Self-host automated trading strategies inside OpenAlgo. Each strategy runs as an isolated
+          Self-host automated trading strategies inside AC Agarwal Algo. Each strategy runs as an isolated
           subprocess with its own process, memory, and log file &mdash; managed through the{' '}
           <Link to="/python" className="text-primary hover:underline">
             /python
@@ -348,7 +348,7 @@ export default function PythonStrategyGuide() {
                   <Link to="/apikey" className="text-primary hover:underline">
                     API Key
                   </Link>{' '}
-                  page and copy your OpenAlgo API key
+                  page and copy your AC Agarwal API key
                 </p>
               </div>
             </div>
@@ -1002,7 +1002,7 @@ export default function PythonStrategyGuide() {
                   <div className="bg-muted p-3 rounded-lg">
                     <p className="font-medium">Manual Override</p>
                     <p className="mt-1">
-                      Log in to OpenAlgo before the session, wait for master contracts to download,
+                      Log in to AC Agarwal Algo before the session, wait for master contracts to download,
                       and click <strong>Start</strong> manually. Click <strong>Stop</strong> when
                       the session ends.
                     </p>
@@ -1020,7 +1020,7 @@ export default function PythonStrategyGuide() {
                 </p>
                 <p>Master contracts are automatically downloaded when you:</p>
                 <ol className="list-decimal list-inside space-y-1 ml-2">
-                  <li>Log in to OpenAlgo</li>
+                  <li>Log in to AC Agarwal Algo</li>
                   <li>Wait for the download to complete (shown in header)</li>
                 </ol>
                 <p className="text-sm">
@@ -1034,7 +1034,7 @@ export default function PythonStrategyGuide() {
               <AccordionContent className="text-muted-foreground space-y-3">
                 <p>
                   On Linux/macOS, per-strategy resource limits prevent buggy scripts from crashing
-                  OpenAlgo. On Windows, these are not enforced at the OS level.
+                  AC Agarwal Algo. On Windows, these are not enforced at the OS level.
                 </p>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm border-collapse">
@@ -1101,9 +1101,9 @@ export default function PythonStrategyGuide() {
             </AccordionItem>
 
             <AccordionItem value="restart">
-              <AccordionTrigger>What happens if I restart OpenAlgo?</AccordionTrigger>
+              <AccordionTrigger>What happens if I restart AC Agarwal Algo?</AccordionTrigger>
               <AccordionContent className="text-muted-foreground space-y-3">
-                <p>OpenAlgo handles restarts gracefully:</p>
+                <p>AC Agarwal Algo handles restarts gracefully:</p>
                 <ul className="list-disc list-inside space-y-1 ml-2">
                   <li>Strategy configurations are saved to disk and persist</li>
                   <li>Schedules are automatically re-created for all strategies</li>
@@ -1193,7 +1193,7 @@ export default function PythonStrategyGuide() {
               </AccordionTrigger>
               <AccordionContent className="text-muted-foreground space-y-3">
                 <p>
-                  If your strategy needs additional Python libraries, install them in OpenAlgo's
+                  If your strategy needs additional Python libraries, install them in AC Agarwal Algo's
                   environment.
                 </p>
 
@@ -1208,7 +1208,7 @@ export default function PythonStrategyGuide() {
                       <li>
                         Run <code>uv sync</code> in the openalgo directory
                       </li>
-                      <li>Restart OpenAlgo</li>
+                      <li>Restart AC Agarwal Algo</li>
                     </ol>
                   </div>
 
@@ -1221,7 +1221,7 @@ export default function PythonStrategyGuide() {
                       <li>
                         Activate your venv and run <code>pip install -r requirements.txt</code>
                       </li>
-                      <li>Restart OpenAlgo</li>
+                      <li>Restart AC Agarwal Algo</li>
                     </ol>
                   </div>
                 </div>

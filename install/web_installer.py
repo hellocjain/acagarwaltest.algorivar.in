@@ -695,7 +695,7 @@ server {{
     _install_state["message"] = "Creating and starting openalgo systemd service..."
 
     systemd_unit = f"""[Unit]
-Description=OpenAlgo Algorithmic Trading Platform
+Description=AC Agarwal Algorithmic Trading Platform
 After=network.target
 
 [Service]
@@ -733,7 +733,7 @@ WantedBy=multi-user.target
     )
     _install_state["completed_url"] = completed_url
     _install_state["status"] = "success"
-    _install_state["message"] = f"OpenAlgo installed successfully! Ready at {completed_url}"
+    _install_state["message"] = f"AC Agarwal Algo installed successfully! Ready at {completed_url}"
     _install_state["summary"] = {
         "dashboard_url": completed_url,
         "broker": broker,
@@ -741,12 +741,12 @@ WantedBy=multi-user.target
         "app_key": app_key,
         "mcp_url": f"https://{domain}/mcp" if enable_mcp and domain else "",
     }
-    stream_log(f"🎉 OpenAlgo installation complete! Access your dashboard at: {completed_url}", "SUCCESS")
+    stream_log(f"🎉 AC Agarwal Algo installation complete! Access your dashboard at: {completed_url}", "SUCCESS")
 
     def auto_shutdown():
         time.sleep(3.0)
         print("\n" + "=" * 65)
-        print("🎉 OpenAlgo is now live and running in the background!")
+        print("🎉 AC Agarwal Algo is now live and running in the background!")
         print(f"👉 Access your dashboard at: {completed_url}")
         print("=" * 65 + "\n")
         os._exit(0)
@@ -760,7 +760,7 @@ HTML_PAGE = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>OpenAlgo One-Click Server Installer</title>
+  <title>AC Agarwal Algo Server Installer</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -794,7 +794,7 @@ HTML_PAGE = """<!DOCTYPE html>
           <i class="fa-solid fa-chart-line text-white text-xl"></i>
         </div>
         <div>
-          <h1 class="font-bold text-lg text-white leading-tight">OpenAlgo</h1>
+          <h1 class="font-bold text-lg text-white leading-tight">AC Agarwal Algo</h1>
           <p class="text-xs text-slate-400">Server Setup Wizard</p>
         </div>
       </div>
@@ -1029,7 +1029,7 @@ BROKER_OPTIONS_PLACEHOLDER
           </div>
           <div class="flex items-center space-x-2.5 text-slate-400" id="step3">
             <i class="fa-regular fa-circle text-slate-500"></i>
-            <span>3. Clone OpenAlgo & build venv</span>
+            <span>3. Clone AC Agarwal Algo & build venv</span>
           </div>
           <div class="flex items-center space-x-2.5 text-slate-400" id="step4">
             <i class="fa-regular fa-circle text-slate-500"></i>
@@ -1051,7 +1051,7 @@ BROKER_OPTIONS_PLACEHOLDER
 
         <!-- Terminal Output -->
         <div class="rounded-xl bg-slate-950 border border-slate-800 p-3 font-mono text-[11px] leading-relaxed h-72 overflow-y-auto" id="terminal">
-          <div class="text-slate-500">[System] OpenAlgo Web Setup Wizard initialized. Waiting for input...</div>
+          <div class="text-slate-500">[System] AC Agarwal Algo Web Setup Wizard initialized. Waiting for input...</div>
         </div>
 
         <!-- Success Complete Banner (Hidden by default) -->
@@ -1061,7 +1061,7 @@ BROKER_OPTIONS_PLACEHOLDER
               <i class="fa-solid fa-check"></i>
             </div>
             <div>
-              <h4 class="font-bold text-white text-sm">OpenAlgo is Live!</h4>
+              <h4 class="font-bold text-white text-sm">AC Agarwal Algo is Live!</h4>
               <p class="text-xs text-slate-400">Services are active and running in background.</p>
             </div>
           </div>
@@ -1219,7 +1219,7 @@ BROKER_OPTIONS_PLACEHOLDER
 
       submitBtn.disabled = true;
       submitBtn.classList.add('opacity-50', 'cursor-not-allowed');
-      submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Installing OpenAlgo...';
+      submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Installing AC Agarwal Algo...';
 
       const payload = {
         domain: form.domain.value,
@@ -1313,7 +1313,7 @@ BROKER_OPTIONS_PLACEHOLDER
             if (submitBtn) {
               submitBtn.disabled = true;
               submitBtn.className = 'w-full py-3.5 px-6 rounded-2xl bg-emerald-600 text-white font-bold text-base shadow-xl flex items-center justify-center space-x-2 opacity-90 cursor-default';
-              submitBtn.innerHTML = '<i class="fa-solid fa-circle-check mr-2"></i> OpenAlgo Installed & Running';
+              submitBtn.innerHTML = '<i class="fa-solid fa-circle-check mr-2"></i> AC Agarwal Algo Installed & Running';
             }
           } else if (data.status === 'error') {
             evtSource.close();
@@ -1491,7 +1491,7 @@ def start_server(port: int = DEFAULT_PORT):
     httpd = socketserver.TCPServer(server_address, WebInstallerHTTPHandler)
 
     print("\n" + "=" * 65)
-    print("        🚀 OPENALGO ONE-CLICK SERVER INSTALLER WIZARD")
+    print("        🚀 AC AGARWAL ALGO ONE-CLICK SERVER INSTALLER WIZARD")
     print("=" * 65)
     print(f"\n👉 Open this URL in your web browser to configure your server:\n")
     print(f"   http://{pub_ip}:{port}/?token={_security_token}")
@@ -1508,7 +1508,7 @@ def start_server(port: int = DEFAULT_PORT):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="OpenAlgo One-Click Server Installer")
+    parser = argparse.ArgumentParser(description="AC Agarwal Algo One-Click Server Installer")
     parser.add_argument(
         "--port", type=int, default=DEFAULT_PORT, help="Port to bind web installer"
     )

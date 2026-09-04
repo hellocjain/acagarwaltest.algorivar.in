@@ -7,7 +7,7 @@ BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# OpenAlgo Domain Change Banner
+# AC Agarwal Algo Domain Change Banner
 echo -e "${BLUE}"
 echo "  ██████╗ ██████╗ ███████╗███╗   ██╗ █████╗ ██╗      ██████╗  ██████╗ "
 echo " ██╔═══██╗██╔══██╗██╔════╝████╗  ██║██╔══██╗██║     ██╔════╝ ██╔═══██╗"
@@ -18,7 +18,7 @@ echo "  ╚═════╝ ╚═╝     ╚══════╝╚═╝  �
 echo "                      DOMAIN  CHANGE  SCRIPT                             "
 echo -e "${NC}"
 
-# OpenAlgo Domain Change Script
+# AC Agarwal Algo Domain Change Script
 # Changes the domain for an existing OpenAlgo server deployment.
 # Updates .env, Nginx config, and obtains a new SSL certificate.
 

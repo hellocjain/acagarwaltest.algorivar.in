@@ -113,8 +113,8 @@ export function Navbar({ fluid = false }: NavbarProps = {}) {
                 className="flex items-center gap-2 px-2"
                 onClick={() => setMobileOpen(false)}
               >
-                <img src="/logo.png" alt="OpenAlgo" className="h-8 w-8" />
-                <span className="font-semibold">OpenAlgo</span>
+                <img src="/logo.png" alt="AC Agarwal" className="h-8 w-auto object-contain max-w-[140px]" />
+                <span className="font-semibold">AC Agarwal</span>
               </Link>
 
               {/* Secondary nav items (not in bottom nav) */}
@@ -186,14 +186,14 @@ export function Navbar({ fluid = false }: NavbarProps = {}) {
                   )
                 })}
                 <a
-                  href="https://docs.openalgo.in"
+                  href="https://acagarwal.com"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-3 rounded-lg px-3 py-3 text-sm transition-colors min-h-[44px] touch-manipulation hover:bg-muted active:bg-muted"
                   onClick={() => setMobileOpen(false)}
                 >
                   <BookOpen className="h-4 w-4" />
-                  Docs
+                  Website
                 </a>
               </nav>
             </div>
@@ -202,8 +202,8 @@ export function Navbar({ fluid = false }: NavbarProps = {}) {
 
         {/* Logo */}
         <Link to="/dashboard" className="flex items-center gap-2 mr-6">
-          <img src="/logo.png" alt="OpenAlgo" className="h-8 w-8" />
-          <span className="hidden font-semibold sm:inline-block">OpenAlgo</span>
+          <img src="/logo.png" alt="AC Agarwal" className="h-8 w-auto object-contain max-w-[140px]" />
+          <span className="hidden font-semibold sm:inline-block">AC Agarwal</span>
         </Link>
 
         {/* Desktop Navigation.
@@ -343,7 +343,7 @@ export function Navbar({ fluid = false }: NavbarProps = {}) {
               )}
               <DropdownMenuItem asChild>
                 <a
-                  href="https://docs.openalgo.in"
+                  href="https://acagarwal.com"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-2"

@@ -1181,7 +1181,7 @@ if __name__ == "__main__":
                 _dip = "127.0.0.1"
         _wu = f"http://{_dip}:{port}"
         _wsu = f"ws://{_dip}:{os.getenv('WEBSOCKET_PORT', 8765)}"
-        _du = "https://docs.openalgo.in"
+        _du = "https://acagarwal.com"
         G, C, M, W, Y, R, BD, DM = (
             "\033[92m",
             "\033[96m",
@@ -1197,8 +1197,8 @@ if __name__ == "__main__":
         def _vl(t):
             return len(_ae.sub("", t))
 
-        _t = f" OpenAlgo v{_ver} "
-        _sl = "Your Personal Algo Trading Platform"
+        _t = f" AC Agarwal Algo v{_ver} "
+        _sl = "A C Agarwal Algorithmic Trading Platform"
         _samps = [
             "",
             _sl,

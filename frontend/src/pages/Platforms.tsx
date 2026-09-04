@@ -38,7 +38,7 @@ export default function Platforms() {
           Trading Platforms
         </h1>
         <p className="text-muted-foreground mt-1">
-          Connect your favorite charting platforms with OpenAlgo for automated trading
+          Connect your favorite charting platforms with AC Agarwal for automated trading
         </p>
       </div>
 
@@ -82,7 +82,7 @@ export default function Platforms() {
             configuring webhooks.
           </span>
           <Button asChild variant="outline" size="sm" className="gap-1 flex-shrink-0">
-            <a href="https://docs.openalgo.in" target="_blank" rel="noopener noreferrer">
+            <a href="https://acagarwal.com" target="_blank" rel="noopener noreferrer">
               View Documentation
             </a>
           </Button>

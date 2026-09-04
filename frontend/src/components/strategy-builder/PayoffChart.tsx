@@ -294,7 +294,7 @@ export function PayoffChart({
       y: 0,
       xref: 'paper',
       yref: 'paper',
-      text: 'openalgo.in',
+      text: 'acagarwal.com',
       showarrow: false,
       xanchor: 'right',
       yanchor: 'top',
