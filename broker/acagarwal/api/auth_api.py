@@ -82,15 +82,13 @@ def authenticate_broker(request_token=None):
             else:
                 desc = result.get("description") or result.get("message") or "Authentication failed"
                 return None, None, None, f"AC Agarwal Interactive Login rejected: {desc}"
-        elif response.status_code in (502, 503, 504):
+        else:
             if is_auto_offline_fallback_enabled():
                 logger.warning(
-                    f"AC Agarwal Symphony XTS returned HTTP {response.status_code} (maintenance). "
+                    f"AC Agarwal Symphony XTS returned HTTP {response.status_code} (server down/maintenance). "
                     "Activating Offline Simulation Mode."
                 )
                 return "OFFLINE_MOCK_ACAGARWAL_TOKEN", "OFFLINE_MOCK_FEED_TOKEN", "ACAGARWAL_OFFLINE", None
-            return None, None, None, f"AC Agarwal server maintenance ({response.status_code})"
-        else:
             try:
                 error_detail = response.json()
                 error_message = error_detail.get("message") or error_detail.get("description") or response.text
