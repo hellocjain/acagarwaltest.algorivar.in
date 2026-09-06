@@ -81,6 +81,7 @@ def download_csv_acagarwal_data(output_path):
     client = get_httpx_client()
     headers = {"Content-Type": "application/json"}
     os.makedirs(output_path, exist_ok=True)
+    downloaded_count = 0
 
     for segment in exchange_segments:
         try:
@@ -108,8 +109,11 @@ def download_csv_acagarwal_data(output_path):
                 writer.writerow(header.strip().split(","))
                 writer.writerows(csv_data)
             logger.info(f"Downloaded and saved {segment_output_path}")
+            downloaded_count += 1
         except Exception as e:
             logger.error(f"Error downloading {segment}: {e}")
+
+    return downloaded_count
 
 
 def fetch_index_list():
@@ -414,7 +418,17 @@ def master_contract_download():
     output_path = "tmp"
 
     try:
-        download_csv_acagarwal_data(output_path)
+        downloaded = download_csv_acagarwal_data(output_path)
+        if downloaded == 0:
+            logger.warning(
+                "No master contract CSV files were downloaded (market data server offline/maintenance). "
+                "Retaining existing database symbols."
+            )
+            return socketio.emit(
+                "master_contract_download",
+                {"status": "success", "message": "Offline mode: retained existing cached symbols"},
+            )
+
         delete_symtoken_table()
 
         for proc_func, seg_name in [

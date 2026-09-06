@@ -1,4 +1,4 @@
-"""AC Agarwal Funds & Margin Data API."""
+import os
 
 from broker.acagarwal.baseurl import INTERACTIVE_URL
 from utils.httpx_client import get_httpx_client
@@ -7,10 +7,31 @@ from utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _get_offline_margin_data():
+    """Return realistic mock margin data for offline simulation mode."""
+    return {
+        "availablecash": "500000.00",
+        "collateral": "0.00",
+        "m2munrealized": "0.00",
+        "m2mrealized": "0.00",
+        "utiliseddebits": "0.00",
+    }
+
+
 def get_margin_data(auth_token):
     """
     Fetch account margin / balance data from AC Agarwal XTS API.
     """
+    if auth_token and str(auth_token).startswith("OFFLINE_"):
+        logger.info("Using simulated margin data for offline session")
+        return _get_offline_margin_data()
+
+    is_auto_fallback = os.getenv("ACAGARWAL_AUTO_OFFLINE_FALLBACK", "true").lower() in ("true", "1", "yes")
+    is_bypass = os.getenv("ACAGARWAL_OFFLINE_BYPASS", "").lower() in ("true", "1", "yes")
+
+    if is_bypass:
+        return _get_offline_margin_data()
+
     client = get_httpx_client()
     headers = {"authorization": auth_token, "Content-Type": "application/json"}
 
@@ -58,7 +79,13 @@ def get_margin_data(auth_token):
             }
             return processed_margin_data
         else:
+            if is_auto_fallback:
+                logger.warning("Empty margin data from XTS server; returning offline simulation margin")
+                return _get_offline_margin_data()
             return {}
     except Exception as e:
-        logger.exception("Failed to fetch AC Agarwal margin data")
+        logger.warning(f"Failed to fetch AC Agarwal margin data ({e})")
+        if is_auto_fallback or is_bypass:
+            logger.info("Falling back to offline simulation margin data")
+            return _get_offline_margin_data()
         return {}

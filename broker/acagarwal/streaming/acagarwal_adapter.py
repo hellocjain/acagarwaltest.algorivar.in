@@ -60,6 +60,13 @@ class AcagarwalWebSocketAdapter(BaseBrokerWebSocketAdapter):
             api_key = auth_data.get("api_key") or os.getenv("BROKER_API_KEY_MARKET") or os.getenv("BROKER_API_KEY")
             api_secret = auth_data.get("api_secret") or os.getenv("BROKER_API_SECRET_MARKET") or os.getenv("BROKER_API_SECRET")
 
+        self.auth_token = auth_token
+
+        if auth_token and str(auth_token).startswith("OFFLINE_"):
+            self.logger.info("Offline simulation session detected; skipping WebSocket client setup")
+            self.running = True
+            return
+
         if not api_key or not api_secret:
             raise ValueError("Missing AC Agarwal XTS API credentials in environment variables")
 
@@ -84,6 +91,10 @@ class AcagarwalWebSocketAdapter(BaseBrokerWebSocketAdapter):
         self.running = True
 
     def connect(self) -> None:
+        if self.auth_token and str(self.auth_token).startswith("OFFLINE_"):
+            self.logger.info("Offline simulation mode active; skipping WebSocket connection")
+            return
+
         if not self.ws_client:
             raise RuntimeError("Adapter not initialized. Call initialize() first.")
 

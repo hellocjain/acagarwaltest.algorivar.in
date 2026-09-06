@@ -261,3 +261,105 @@ def test_acagarwal_get_history_ohlc(monkeypatch):
     assert df["volume"].iloc[0] == 154
     assert df["oi"].iloc[0] == 33279
 
+
+def test_acagarwal_offline_bypass(monkeypatch):
+    """Test AC Agarwal authentication with explicit ACAGARWAL_OFFLINE_BYPASS=true."""
+    from broker.acagarwal.api.auth_api import authenticate_broker
+    monkeypatch.setenv("ACAGARWAL_OFFLINE_BYPASS", "true")
+
+    token, feed_token, user_id, err = authenticate_broker()
+    assert err is None
+    assert token.startswith("OFFLINE_")
+    assert feed_token.startswith("OFFLINE_")
+    assert user_id == "ACAGARWAL_OFFLINE"
+
+
+def test_acagarwal_offline_connection_fallback(monkeypatch):
+    """Test automatic offline simulation fallback when XTS server raises network error."""
+    import httpx
+    from broker.acagarwal.api.auth_api import authenticate_broker
+    monkeypatch.delenv("ACAGARWAL_OFFLINE_BYPASS", raising=False)
+    monkeypatch.setenv("ACAGARWAL_AUTO_OFFLINE_FALLBACK", "true")
+    monkeypatch.setenv("BROKER_API_KEY", "dummy_key")
+    monkeypatch.setenv("BROKER_API_SECRET", "dummy_secret")
+
+    class MockFailingClient:
+        def post(self, *args, **kwargs):
+            raise httpx.ConnectError("Connection refused to symphony.acagarwal.com:3000")
+
+    monkeypatch.setattr("broker.acagarwal.api.auth_api.get_httpx_client", lambda: MockFailingClient())
+
+    token, feed_token, user_id, err = authenticate_broker()
+    assert err is None
+    assert token.startswith("OFFLINE_")
+    assert feed_token.startswith("OFFLINE_")
+
+
+def test_acagarwal_offline_margin_data():
+    """Test funds API returns valid simulated margin data for offline sessions."""
+    from broker.acagarwal.api.funds import get_margin_data
+    margin = get_margin_data("OFFLINE_MOCK_ACAGARWAL_TOKEN")
+    assert isinstance(margin, dict)
+    assert margin["availablecash"] == "500000.00"
+    assert margin["collateral"] == "0.00"
+    assert margin["m2munrealized"] == "0.00"
+    assert margin["m2mrealized"] == "0.00"
+    assert margin["utiliseddebits"] == "0.00"
+
+
+def test_acagarwal_offline_order_api():
+    """Test order book, positions, and placement in offline simulation mode."""
+    from broker.acagarwal.api.order_api import (
+        get_order_book,
+        get_positions,
+        get_holdings,
+        place_order_api,
+        cancel_order,
+        modify_order,
+    )
+    auth = "OFFLINE_MOCK_ACAGARWAL_TOKEN"
+
+    # Order book and positions should return empty lists without network calls
+    ob = get_order_book(auth)
+    assert ob["type"] == "success"
+    assert ob["result"] == []
+
+    pos = get_positions(auth)
+    assert pos["type"] == "success"
+    assert pos["result"]["positionList"] == []
+
+    holdings = get_holdings(auth)
+    assert holdings["type"] == "success"
+    assert holdings["result"]["holdingList"] == []
+
+    # Order placement simulation
+    order_payload = {
+        "exchangeSegment": "NSECM",
+        "exchangeInstrumentID": 2885,
+        "productType": "MIS",
+        "orderType": "LIMIT",
+        "orderSide": "BUY",
+        "timeInForce": "DAY",
+        "disclosedQuantity": "0",
+        "orderQuantity": "10",
+        "limitPrice": "2500.00",
+        "stopPrice": "0",
+        "orderUniqueIdentifier": "openalgo",
+        "tradingSymbol": "RELIANCE-EQ",
+    }
+    resp, resp_data, orderid = place_order_api(order_payload, auth)
+    assert resp.status_code == 200
+    assert resp_data["type"] == "success"
+    assert str(orderid).startswith("OFFLINE_")
+
+    # Cancel order simulation
+    c_resp, c_status = cancel_order(orderid, auth)
+    assert c_status == 200
+    assert c_resp["status"] == "success"
+    assert c_resp["orderid"] == orderid
+
+    # Modify order simulation
+    m_resp, m_status = modify_order({"orderid": orderid, "symbol": "RELIANCE", "exchange": "NSE"}, auth)
+    assert m_status == 200
+    assert m_resp["status"] == "success"
+
