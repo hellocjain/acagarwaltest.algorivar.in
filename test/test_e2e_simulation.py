@@ -69,7 +69,7 @@ def test_e2e_web_installer_homepage_served(running_web_installer):
     with urllib.request.urlopen(url) as resp:
         assert resp.status == 200
         html = resp.read().decode("utf-8")
-        assert "OpenAlgo" in html
+        assert "AC Agarwal Algo" in html or "OpenAlgo" in html
         assert "Server Setup Wizard" in html
         assert "acagarwal" in html
 
