@@ -61,7 +61,12 @@ def broker_callback(broker, para=None):
         session["broker"] = broker
         return redirect(url_for("dashboard_bp.dashboard"))
 
-    broker_auth_functions = app.broker_auth_functions
+    broker_auth_functions = getattr(app, "broker_auth_functions", None)
+    if broker_auth_functions is None:
+        from utils.plugin_loader import load_broker_auth_functions
+        broker_auth_functions = load_broker_auth_functions()
+        app.broker_auth_functions = broker_auth_functions
+
     auth_function = broker_auth_functions.get(f"{broker}_auth")
 
     if not auth_function:
