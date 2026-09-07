@@ -27,6 +27,7 @@
 
 import type { ReactNode } from 'react'
 import { AgentSetupGate, useAgentConfigured } from '@/components/agent/AgentSetupGate'
+import { AgentSubNav } from '@/components/agent/AgentSubNav'
 import { Navbar } from '@/components/layout/Navbar'
 import AgentChat from './AgentChat'
 
@@ -44,6 +45,7 @@ function AgentShell({ children }: { children: ReactNode }) {
       {/* Full-bleed page: the nav spans the viewport rather than Layout's
           centred container. See NavbarProps.fluid. */}
       <Navbar fluid />
+      <AgentSubNav />
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
     </>
   )

@@ -41,9 +41,9 @@
  */
 
 import { useQuery } from '@tanstack/react-query'
-import { AlertCircle, Bot, SlidersHorizontal } from 'lucide-react'
+import { AlertCircle, Bot, SlidersHorizontal, Zap } from 'lucide-react'
 import { useCallback, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import {
   agentErrorMessage,
   agentQueryKeys,
@@ -51,6 +51,7 @@ import {
   type ReasoningEffort,
   truncateConversation,
 } from '@/api/agent'
+import { startRun } from '@/api/strategy_module'
 import { Composer, type ComposerTurn } from '@/components/agent/Composer'
 import { ConversationSidebar } from '@/components/agent/ConversationSidebar'
 import { Message } from '@/components/agent/Message'
@@ -62,6 +63,37 @@ import { type AgentMessage, useAgentStream } from '@/lib/agent/useAgentStream'
 import { usePinNewestQuestion } from '@/lib/agent/useThreadScroll'
 import { cn } from '@/lib/utils'
 
+const STARTER_PROMPTS = [
+  {
+    icon: '🛡️',
+    title: 'Safe Weekly Income',
+    desc: 'Conservative NIFTY option selling (~₹50k capital, ₹1,500 SL)',
+    prompt:
+      'Help me set up a safe weekly income strategy on NIFTY with ₹50,000 capital and strict ₹1,500 stop loss protection.',
+  },
+  {
+    icon: '⚡',
+    title: 'Expiry Day Momentum',
+    desc: 'Small target intraday momentum with ₹1,000 max risk',
+    prompt:
+      'Create an expiry day momentum strategy on NIFTY with ₹1,000 max stop loss and ₹2,000 profit target.',
+  },
+  {
+    icon: '📉',
+    title: 'Nifty Dip Buyer',
+    desc: 'Buys 1 lot CE when Nifty touches 20-EMA support',
+    prompt:
+      'Create a Nifty dip-buying strategy using 20 EMA on 5-minute candles with 1 lot and ₹1,500 stop loss.',
+  },
+  {
+    icon: '🎯',
+    title: 'Recommend for my Capital',
+    desc: 'AI recommends the safest setup for ₹50,000',
+    prompt:
+      'I have ₹50,000 capital. Recommend the safest automated trading strategy for steady returns with low drawdown.',
+  },
+]
+
 /**
  * The reading column shared by the thread and the composer.
  *
@@ -71,6 +103,7 @@ import { cn } from '@/lib/utils'
 const COLUMN = 'mx-auto w-full max-w-3xl'
 
 export default function AgentChat() {
+  const navigate = useNavigate()
   const [modelId, setModelId] = useState<number | null>(null)
   // Per turn, not persisted: effort belongs to the question being asked.
   const [effort, setEffort] = useState<ReasoningEffort>('off')
@@ -101,6 +134,37 @@ export default function AgentChat() {
   const totals = useMemo(() => sumUsage(messages.map((message) => message.usage)), [messages])
 
   usePinNewestQuestion(threadRef, messages)
+
+  const draftAgents = useMemo(() => {
+    const drafts: Array<Record<string, any>> = []
+    const seen = new Set<number>()
+    for (const msg of messages) {
+      if (msg.viz) {
+        for (const v of msg.viz) {
+          const spec = v.spec as Record<string, any> | undefined
+          if (v.kind === 'agent_draft' && spec && typeof spec.strategy_id === 'number') {
+            if (!seen.has(spec.strategy_id)) {
+              seen.add(spec.strategy_id)
+              drafts.push(spec)
+            }
+          }
+        }
+      }
+    }
+    return drafts
+  }, [messages])
+
+  const [deployingId, setDeployingId] = useState<number | null>(null)
+  const handleDeployDraft = useCallback(async (strategyId: number) => {
+    try {
+      setDeployingId(strategyId)
+      await startRun(strategyId, 'sandbox')
+    } catch (err) {
+      console.error('Failed to deploy draft:', err)
+    } finally {
+      setDeployingId(null)
+    }
+  }, [])
 
   /**
    * The web-search switch as the last sent turn had it.
@@ -273,31 +337,40 @@ export default function AgentChat() {
             container rather than widening the body. */}
         <div ref={threadRef} className="relative min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
           {messages.length === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-              <Bot className="h-10 w-10 text-muted-foreground/50" aria-hidden />
-              {conversationId === null ? (
-                <>
-                  <p className="text-sm font-medium">Ask AC Agarwal Agent</p>
-                  <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
-                    It reads your platform through the same service layer the rest of AC Agarwal Algo uses,
-                    and it can write a trading strategy or a Flow workflow for you to review.
-                  </p>
-                </>
-              ) : (
-                /* A conversation is open and holds nothing. Saying so matters:
-                   the welcome copy above is what an operator sees with nothing
-                   selected at all, so reusing it here reads as a thread that
-                   failed to load rather than one that is genuinely empty. A row
-                   gets into this state when a run was interrupted before its
-                   first message was stored. */
-                <>
-                  <p className="text-sm font-medium">This conversation is empty</p>
-                  <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
-                    Nothing was stored against it, which happens when a run was interrupted before
-                    it answered. Ask something below to carry on in this thread.
-                  </p>
-                </>
-              )}
+            <div className="flex h-full flex-col items-center justify-center gap-6 px-6 py-8 text-center max-w-2xl mx-auto">
+              <div className="flex flex-col items-center gap-2">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary shadow-xs">
+                  <Bot className="h-6 w-6" aria-hidden />
+                </div>
+                <h2 className="text-base font-semibold tracking-tight text-foreground sm:text-lg">
+                  Namaste! I am your AC Agarwal Trading Assistant
+                </h2>
+                <p className="max-w-md text-xs sm:text-sm leading-relaxed text-muted-foreground">
+                  I help you build, test, and run automated trading strategies with strict safety nets.
+                  Tap a starter option below or describe what you want in simple words.
+                </p>
+              </div>
+
+              <div className="grid w-full grid-cols-1 gap-2.5 sm:grid-cols-2 text-left">
+                {STARTER_PROMPTS.map((item, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => handleSend(item.prompt, { webSearch: false, attachments: [] })}
+                    className="group flex flex-col justify-between rounded-xl border border-border bg-card p-3 transition-all hover:border-primary/50 hover:bg-muted/40 hover:shadow-xs cursor-pointer text-left"
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-base">{item.icon}</span>
+                      <span className="text-xs font-semibold text-foreground group-hover:text-primary transition-colors">
+                        {item.title}
+                      </span>
+                    </div>
+                    <p className="text-[11px] leading-normal text-muted-foreground">
+                      {item.desc}
+                    </p>
+                  </button>
+                ))}
+              </div>
             </div>
           ) : (
             <div className={cn(COLUMN, 'space-y-6 px-4 py-4')}>
@@ -351,6 +424,58 @@ export default function AgentChat() {
           </div>
         </div>
       </div>
+
+      {/* Right Rail (Insidur-Style Drafts Rail) */}
+      {draftAgents.length > 0 && (
+        <aside className="hidden w-80 shrink-0 flex-col border-l border-border bg-muted/10 p-4 xl:flex overflow-y-auto">
+          <div className="flex items-center justify-between border-b border-border pb-3">
+            <span className="text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">
+              In This Chat
+            </span>
+            <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-semibold text-primary">
+              {draftAgents.length} {draftAgents.length === 1 ? 'Agent' : 'Agents'}
+            </span>
+          </div>
+
+          <div className="mt-3 space-y-3">
+            <span className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+              Drafts
+            </span>
+            {draftAgents.map((draft, idx) => (
+              <div
+                key={idx}
+                className="rounded-xl border border-border bg-card p-3.5 shadow-xs transition-all hover:border-primary/40"
+              >
+                <div className="mb-1.5 flex items-center gap-2">
+                  <Zap className="h-3.5 w-3.5 text-primary" />
+                  <h5 className="truncate text-xs font-semibold text-foreground">{draft.name}</h5>
+                </div>
+                <p className="mb-3 line-clamp-2 font-mono text-[11px] text-muted-foreground">
+                  {draft.summary || `${draft.underlying} | ${draft.max_lots} lot | SL: ₹${draft.stop_loss_inr}`}
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    className="h-7 flex-1 text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90"
+                    disabled={deployingId === draft.strategy_id}
+                    onClick={() => handleDeployDraft(draft.strategy_id)}
+                  >
+                    {deployingId === draft.strategy_id ? 'Deploying…' : 'Deploy'}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 flex-1 text-xs"
+                    onClick={() => navigate(`/agent/my-agents/${draft.strategy_id}`)}
+                  >
+                    Review
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </aside>
+      )}
     </div>
   )
 }

@@ -35,6 +35,7 @@
 import { lazy, Suspense } from 'react'
 import type { AgentVizItem } from '@/lib/agent/viz'
 import { OPENUI_VIZ, openUiMarkup } from '@/lib/agent/viz'
+import { AgentDraftCard } from './AgentDraftCard'
 import { CandleViz } from './CandleViz'
 import { InstrumentCard } from './InstrumentCard'
 import { LiveComboCard } from './LiveComboCard'
@@ -128,6 +129,8 @@ export function VizBlock({ item, streaming, className }: VizBlockProps) {
       // The card computes the curve with strategyMath and draws it with the
       // /strategybuilder chart, so nothing about the payoff lives here.
       return <PayoffCard spec={item.spec} title={item.title} />
+    case 'agent_draft':
+      return <AgentDraftCard spec={item.spec as any} title={item.title} className={className} />
     case OPENUI_VIZ:
       return (
         <Suspense fallback={null}>

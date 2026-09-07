@@ -483,6 +483,14 @@ TOOLKITS: list[ToolkitSpec] = [
         ),
     ),
     ToolkitSpec(
+        key="autonomous_agent",
+        module="services.agent.tools.build_autonomous_agent",
+        attr="AutonomousAgentToolkit",
+        surfaces=CHAT_ONLY,
+        order=55,
+        description="Build, configure and register an autonomous trading agent strategy. Emits an interactive draft card.",
+    ),
+    ToolkitSpec(
         key="strategy_gen",
         module="services.agent.tools.strategy_gen",
         attr="StrategyGenToolkit",

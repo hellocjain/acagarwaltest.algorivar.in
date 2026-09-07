@@ -40,6 +40,8 @@ const Token = lazy(() => import('@/pages/Token'))
 const Search = lazy(() => import('@/pages/Search'))
 const ApiKey = lazy(() => import('@/pages/ApiKey'))
 const AgentIndex = lazy(() => import('@/pages/agent/AgentIndex'))
+const AgentCockpit = lazy(() => import('@/pages/agent/AgentCockpit'))
+const AgentDetails = lazy(() => import('@/pages/agent/AgentDetails'))
 const AgentConfig = lazy(() => import('@/pages/agent/AgentConfig'))
 const Profile = lazy(() => import('@/pages/Profile'))
 const MasterContract = lazy(() => import('@/pages/MasterContract'))
@@ -314,6 +316,8 @@ function App() {
                     Layout's centred, page-scrolling container cannot hold that,
                     so it renders its own Navbar like /trading does. */}
                 <Route path="/agent" element={<AgentIndex />} />
+                <Route path="/agent/my-agents" element={<AgentCockpit />} />
+                <Route path="/agent/my-agents/:id" element={<AgentDetails />} />
                 {/* Config shares the agent's shell rather than Layout's: the
                     registry and the provider catalog are wide, and a returning
                     operator moves between the two surfaces without the chrome
