@@ -404,6 +404,18 @@ def react_agent_config():
     return serve_react_app()
 
 
+# My Agents Cockpit - overview of all autonomous agents
+@react_bp.route("/agent/my-agents", strict_slashes=False)
+def react_agent_cockpit():
+    return serve_react_app()
+
+
+# Agent Details - plain-language breakdown, live journal and Ask AI drawer
+@react_bp.route("/agent/my-agents/<int:strategy_id>", strict_slashes=False)
+def react_agent_details(strategy_id):
+    return serve_react_app()
+
+
 # Strategy Builder - multi-leg option strategy builder with payoff diagram
 @react_bp.route("/strategybuilder", strict_slashes=False)
 def react_strategybuilder():
