@@ -13,18 +13,19 @@ def test_autonomous_agent_toolkit_builds_draft():
     
     toolkit = AutonomousAgentToolkit(context)
     
-    # Test building an agent
-    result = toolkit.build_autonomous_agent(
-        name="Test Nifty Dip Buyer",
-        underlying="NIFTY",
-        strategy_type="option_buying",
-        capital_inr=50000,
-        stop_loss_inr=1500,
-        target_profit_inr=2500,
-        max_lots=5, # Intentionally pass > 2 to test retail cap!
-        active_days=["MON", "WED", "FRI"],
-        entry_description="Crosses 20 EMA on 5m chart"
-    )
+    from unittest.mock import patch
+    with patch("services.agent.tools.build_autonomous_agent.get_username_by_apikey", return_value="tool_test_user"):
+        result = toolkit.build_autonomous_agent(
+            name="Test Nifty Dip Buyer",
+            underlying="NIFTY",
+            strategy_type="option_buying",
+            capital_inr=50000,
+            stop_loss_inr=1500,
+            target_profit_inr=2500,
+            max_lots=5, # Intentionally pass > 2 to test retail cap!
+            active_days=["MON", "WED", "FRI"],
+            entry_description="Crosses 20 EMA on 5m chart"
+        )
     
     assert "Test Nifty Dip Buyer" in result
     assert "status" in result

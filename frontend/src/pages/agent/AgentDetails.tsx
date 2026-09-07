@@ -58,7 +58,12 @@ import { showToast } from '@/utils/toast'
 
 interface AgentMetadata {
   category?: string
+  universe?: string
+  timeframe?: string
+  product_type?: string
   capital_inr?: number
+  capital_per_trade_inr?: number
+  max_concurrent_positions?: number
   max_lots?: number
   plain_language?: {
     when?: string
@@ -335,7 +340,7 @@ export default function AgentDetails() {
                   {isRunning ? (
                     <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 gap-1.5">
                       <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                      Watching Market
+                      {strategy.strategy_kind === 'scanner' || meta?.universe ? 'Scanning Universe' : 'Watching Market'}
                     </Badge>
                   ) : isPaused ? (
                     <Badge className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 gap-1">
@@ -351,9 +356,15 @@ export default function AgentDetails() {
 
                 {/* Sub-status badges matching Insidur Screenshot 1 */}
                 <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <Badge variant="secondary" className="font-semibold">
-                    {strategy.underlying}
-                  </Badge>
+                  {strategy.strategy_kind === 'scanner' || meta?.universe ? (
+                    <Badge variant="secondary" className="bg-purple-500/10 text-purple-600 dark:text-purple-400 font-semibold">
+                      {meta?.universe || 'NIFTY 500'} Scanner
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary" className="font-semibold">
+                      {strategy.underlying}
+                    </Badge>
+                  )}
                   <Badge
                     variant="outline"
                     className="border-blue-500/30 bg-blue-500/5 text-blue-600 dark:text-blue-400"
@@ -366,12 +377,21 @@ export default function AgentDetails() {
                   >
                     Auto-execute
                   </Badge>
-                  <Badge
-                    variant="outline"
-                    className="border-emerald-500/30 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400"
-                  >
-                    Per-Leg Exit
-                  </Badge>
+                  {strategy.strategy_kind === 'scanner' || meta?.universe ? (
+                    <Badge
+                      variant="outline"
+                      className="border-emerald-500/30 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400"
+                    >
+                      {meta?.product_type || 'CNC'} Cash Equity
+                    </Badge>
+                  ) : (
+                    <Badge
+                      variant="outline"
+                      className="border-emerald-500/30 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400"
+                    >
+                      Per-Leg Exit
+                    </Badge>
+                  )}
                 </div>
               </div>
 

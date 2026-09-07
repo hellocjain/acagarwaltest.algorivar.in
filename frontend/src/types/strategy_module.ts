@@ -16,7 +16,7 @@
 // Enumerations - each one is the store's tuple of the same name
 // ---------------------------------------------------------------------------
 
-export type StrategyKind = 'batch' | 'signal'
+export type StrategyKind = 'batch' | 'signal' | 'scanner'
 export type StrategyDirection = 'both' | 'long_only' | 'short_only'
 export type StrategyType = 'intraday' | 'positional'
 export type StrategyStatus = 'stopped' | 'running' | 'paused' | 'errored'
@@ -576,11 +576,13 @@ export const ATM_OFFSETS: string[] = [
 export const STRATEGY_KIND_LABELS: Record<StrategyKind, string> = {
   batch: 'Multi-leg (batch)',
   signal: 'Signal-driven (TradingView)',
+  scanner: 'Multi-stock Scanner (Autonomous)',
 }
 
 export const STRATEGY_KIND_HINT: Record<StrategyKind, string> = {
   batch: 'All legs entered together on start; exited together on stop. Best for option spreads.',
   signal: 'Each leg reacts to long_entry / long_exit / short_entry / short_exit signals.',
+  scanner: 'Scans equity universes (e.g. NIFTY 500) and executes technical indicators autonomously.',
 }
 
 export const STRATEGY_DIRECTION_LABELS: Record<StrategyDirection, string> = {

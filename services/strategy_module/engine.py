@@ -279,15 +279,20 @@ def start_run(
     if not api_key:
         return StartResult(ok=False, error="No API key is configured for this user")
 
-    # Resolve everything before claiming anything. A leg that cannot be
-    # resolved must not leave a half-started run behind, and resolution is the
-    # step most likely to fail: an expiry that has rolled, a strike outside the
-    # chain, a master contract that has not been downloaded.
-    resolved, failures = _resolve_all_legs(strategy, api_key)
-    if failures:
-        return StartResult(ok=False, error=failures[0]["error"], legs=failures)
-    for leg in resolved:
-        leg["position_ref"] = state.new_position_ref()
+    is_scanner = (strategy_row.strategy_kind or "batch") == "scanner"
+
+    if is_scanner:
+        resolved = []
+    else:
+        # Resolve everything before claiming anything. A leg that cannot be
+        # resolved must not leave a half-started run behind, and resolution is the
+        # step most likely to fail: an expiry that has rolled, a strike outside the
+        # chain, a master contract that has not been downloaded.
+        resolved, failures = _resolve_all_legs(strategy, api_key)
+        if failures:
+            return StartResult(ok=False, error=failures[0]["error"], legs=failures)
+        for leg in resolved:
+            leg["position_ref"] = state.new_position_ref()
 
     # One conditional UPDATE, not a read then a write. The UI, the scheduler
     # and a webhook can all fire at the same instant.
@@ -335,6 +340,20 @@ def start_run(
                 error="Could not link the new run to its strategy; no order was placed",
             )
         state.init_run_state(run_id, strategy_id, resolved)
+
+        if is_scanner:
+            _emit(
+                strategy_id,
+                user_id,
+                "run_started",
+                f"Universal Scanner Agent started in {mode} mode ({trigger_source})",
+                run_id=run_id,
+            )
+            from services.strategy_module.scanner_runner import evaluate_scanner_strategy
+
+            evaluate_scanner_strategy(strategy_id, user_id, mode=mode, run_id=run_id)
+            return StartResult(ok=True, run_id=run_id, legs=[])
+
         # Ask for prices before the entries go out. A fill can be reported
         # within milliseconds, and a leg whose instrument is not subscribed
         # would sit with no price and therefore no stop until the next
@@ -1171,8 +1190,8 @@ def _apply_fill(
     # audit trail that is supposed to describe the day. A signal run is closed
     # by the scheduler's square-off, by an explicit stop, or by the session
     # boundary when the next day's first signal arrives.
-    if requested_reason is None and strategy_kind == "signal":
-        logger.debug("Run %s is flat but signal-mode; leaving it open for the session", run_id)
+    if requested_reason is None and strategy_kind in ("signal", "scanner"):
+        logger.debug("Run %s is flat but %s-mode; leaving it open for the session", run_id, strategy_kind)
         return True
 
     final_reason = requested_reason or "manual"

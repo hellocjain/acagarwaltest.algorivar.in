@@ -9,12 +9,16 @@ export interface AgentDraftCardProps {
   spec: {
     strategy_id: number
     name: string
-    underlying: string
-    strategy_type: string
-    capital_inr: number
-    stop_loss_inr: number
-    target_profit_inr: number
-    max_lots: number
+    strategy_category?: string
+    underlying?: string
+    universe?: string
+    strategy_type?: string
+    capital_inr?: number
+    capital_per_trade_inr?: number
+    max_concurrent_positions?: number
+    stop_loss_inr?: number
+    target_profit_inr?: number
+    max_lots?: number
     account?: string
     summary?: string
     plain_language?: {
@@ -70,6 +74,15 @@ export function AgentDraftCard({ spec, className }: AgentDraftCardProps) {
         </div>
 
         <div className="flex items-center gap-1.5">
+          {spec.strategy_category === 'scanner' || spec.universe ? (
+            <span className="rounded-full bg-purple-500/10 px-2 py-0.5 text-[10px] font-medium text-purple-600 dark:text-purple-400">
+              {spec.universe || 'NIFTY 500'} Scanner
+            </span>
+          ) : (
+            <span className="rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">
+              {spec.underlying || 'NIFTY'} Options
+            </span>
+          )}
           <span
             className={cn(
               'rounded-full px-2 py-0.5 text-[10px] font-medium',
@@ -92,7 +105,10 @@ export function AgentDraftCard({ spec, className }: AgentDraftCardProps) {
       {/* Summary Row */}
       <div className="py-2.5">
         <p className="font-mono text-xs text-muted-foreground">
-          {spec.summary || `${spec.underlying} current_weekly | ${spec.max_lots} lot | SL: ₹${spec.stop_loss_inr} | TGT: ₹${spec.target_profit_inr}`}
+          {spec.summary ||
+            (spec.strategy_category === 'scanner' || spec.universe
+              ? `${spec.universe || 'NIFTY 500'} Scanner | Max ${spec.max_concurrent_positions || 5} concurrent | ₹${spec.capital_per_trade_inr || 10000}/trade`
+              : `${spec.underlying || 'NIFTY'} current_weekly | ${spec.max_lots || 1} lot | SL: ₹${spec.stop_loss_inr} | TGT: ₹${spec.target_profit_inr}`)}
         </p>
       </div>
 
@@ -162,6 +178,13 @@ export function AgentDraftCard({ spec, className }: AgentDraftCardProps) {
               <span className="text-muted-foreground">{spec.plain_language.when}</span>
             </div>
           </div>
+
+          {spec.plain_language.entry_gates && spec.plain_language.entry_gates.length > 0 && (
+            <div className="pl-5 text-muted-foreground">
+              <span className="font-semibold text-foreground">ENTRY GATES: </span>
+              {spec.plain_language.entry_gates.join(' · ')}
+            </div>
+          )}
 
           {spec.plain_language.it_scans && (
             <div className="pl-5 text-muted-foreground">

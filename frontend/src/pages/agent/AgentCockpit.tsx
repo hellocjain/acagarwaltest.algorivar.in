@@ -45,7 +45,12 @@ import { showToast } from '@/utils/toast'
 
 interface AgentMetadata {
   category?: string
+  universe?: string
+  timeframe?: string
+  product_type?: string
   capital_inr?: number
+  capital_per_trade_inr?: number
+  max_concurrent_positions?: number
   max_lots?: number
   plain_language?: {
     when?: string
@@ -278,9 +283,15 @@ export default function AgentCockpit() {
                             <Link to={`/agent/my-agents/${strategy.id}`}>{strategy.name}</Link>
                           </CardTitle>
                           <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                            <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-semibold">
-                              {strategy.underlying}
-                            </Badge>
+                            {meta?.universe || strategy.strategy_kind === 'scanner' ? (
+                              <Badge variant="secondary" className="bg-purple-500/10 text-purple-600 dark:text-purple-400 px-1.5 py-0 text-[10px] font-semibold">
+                                {meta?.universe || 'NIFTY 500'} Scanner
+                              </Badge>
+                            ) : (
+                              <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-semibold">
+                                {strategy.underlying}
+                              </Badge>
+                            )}
                             {meta?.category && (
                               <Badge variant="outline" className="px-1.5 py-0 text-[10px] capitalize">
                                 {meta.category.replace('_', ' ')}
@@ -300,7 +311,7 @@ export default function AgentCockpit() {
                           {isRunning ? (
                             <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
                               <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                              Watching
+                              {strategy.strategy_kind === 'scanner' || meta?.universe ? 'Scanning' : 'Watching'}
                             </span>
                           ) : isPaused ? (
                             <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-600 dark:text-amber-400">
@@ -328,20 +339,37 @@ export default function AgentCockpit() {
                         </div>
 
                         {/* Risk & Safety Limits */}
-                        <div className="mt-2.5 grid grid-cols-2 gap-2 border-t pt-2 text-[11px] text-muted-foreground">
-                          <div>
-                            <span>Max Daily Loss: </span>
-                            <span className="font-semibold text-foreground">
-                              ₹{(strategy.daily_loss_limit_inr ?? 0).toLocaleString('en-IN')}
-                            </span>
+                        {strategy.strategy_kind === 'scanner' || meta?.universe ? (
+                          <div className="mt-2.5 grid grid-cols-2 gap-2 border-t pt-2 text-[11px] text-muted-foreground">
+                            <div>
+                              <span>Alloc / Trade: </span>
+                              <span className="font-semibold text-foreground">
+                                ₹{(meta?.capital_per_trade_inr ?? 10000).toLocaleString('en-IN')}
+                              </span>
+                            </div>
+                            <div className="text-right">
+                              <span>Max Stocks: </span>
+                              <span className="font-semibold text-foreground">
+                                {meta?.max_concurrent_positions ?? 5} Concurrent
+                              </span>
+                            </div>
                           </div>
-                          <div className="text-right">
-                            <span>Max Lots: </span>
-                            <span className="font-semibold text-foreground">
-                              {meta?.max_lots ?? 1} Lot
-                            </span>
+                        ) : (
+                          <div className="mt-2.5 grid grid-cols-2 gap-2 border-t pt-2 text-[11px] text-muted-foreground">
+                            <div>
+                              <span>Max Daily Loss: </span>
+                              <span className="font-semibold text-foreground">
+                                ₹{(strategy.daily_loss_limit_inr ?? 0).toLocaleString('en-IN')}
+                              </span>
+                            </div>
+                            <div className="text-right">
+                              <span>Max Lots: </span>
+                              <span className="font-semibold text-foreground">
+                                {meta?.max_lots ?? 1} Lot
+                              </span>
+                            </div>
                           </div>
-                        </div>
+                        )}
                       </div>
 
                       {/* Plain Language Summary */}
