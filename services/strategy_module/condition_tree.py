@@ -97,7 +97,7 @@ def compute_indicator_series(df: pd.DataFrame, name: str, params: dict[str, Any]
                 return pd.Series(np.nan, index=df.index)
             mult = float(p.get("multiplier") or 3.0)
             st_val, st_dir = ta.supertrend(h, l, c, period=period, multiplier=mult)
-            if field_name == "direction":
+            if field_name in ("direction", "trend", "signal"):
                 return pd.Series(st_dir, index=df.index)
             return pd.Series(st_val, index=df.index)
 
@@ -160,18 +160,42 @@ def compute_indicator_series(df: pd.DataFrame, name: str, params: dict[str, Any]
 def _eval_indicator_leaf(leaf: dict[str, Any], df: pd.DataFrame, idx: int) -> tuple[bool, DiagnosticLeaf]:
     ind_name = leaf.get("indicator") or leaf.get("name", "RSI")
     params = leaf.get("params") or {}
-    field_name = leaf.get("field")
-    comp = leaf.get("comp") or leaf.get("op", "<")
+    field_name = leaf.get("field") or leaf.get("output")
+    comp = leaf.get("comp") or leaf.get("op") or leaf.get("operator") or "<"
     target_val = leaf.get("value")
+
+    # For Supertrend with categorical values, ensure direction series is fetched
+    if str(ind_name).lower() == "supertrend":
+        if isinstance(target_val, str) and target_val.lower() in ("bullish", "bearish", "bull", "bear"):
+            field_name = "direction"
+        elif field_name in ("trend", "output"):
+            field_name = "direction"
 
     series = compute_indicator_series(df, ind_name, params=params, field_name=field_name)
     actual = series.iloc[idx]
 
-    # Special handling for categorical comparisons like Supertrend direction (1 = bullish, -1 = bearish)
+    # Special handling for categorical comparisons like Supertrend direction (bullish vs bearish)
     if isinstance(target_val, str) and target_val.lower() in ("bullish", "bearish", "bull", "bear"):
-        is_bullish = actual == 1 or actual > 0
+        if str(ind_name).lower() == "supertrend":
+            close_series = _get_series(df, "close")
+            close_val = close_series.iloc[idx]
+            st_val_series = compute_indicator_series(df, "supertrend", params=params, field_name="value")
+            st_line = st_val_series.iloc[idx]
+            if pd.isna(close_val) or pd.isna(st_line):
+                return False, DiagnosticLeaf(
+                    node_type="indicator",
+                    label=f"SUPERTREND is {target_val.capitalize()}",
+                    actual_value="Waiting for bars",
+                    comp="==",
+                    threshold=target_val.capitalize(),
+                    passed=False,
+                )
+            is_bullish = bool(close_val >= st_line)
+        else:
+            is_bullish = bool(actual == 1 or (actual is not None and not pd.isna(actual) and actual > 0))
+
         expected_bullish = target_val.lower() in ("bullish", "bull")
-        passed = (is_bullish == expected_bullish)
+        passed = bool(is_bullish == expected_bullish)
         label = f"{ind_name.upper()} is {target_val.capitalize()}"
         return passed, DiagnosticLeaf(
             node_type="indicator",
@@ -355,9 +379,10 @@ def evaluate_node(node: dict[str, Any], df: pd.DataFrame, idx: int = -1) -> tupl
         return True, []
 
     # Branch Node with boolean operator
-    if "op" in node and "rules" in node:
+    has_rules = "rules" in node or "children" in node
+    if "op" in node and has_rules:
         op = node["op"].upper().strip()
-        rules = node["rules"]
+        rules = node.get("rules") or node.get("children") or []
         all_diags: list[dict[str, Any]] = []
 
         if op == "AND":
@@ -510,10 +535,11 @@ def extract_tree_leaves(tree: dict[str, Any]) -> list[dict[str, Any]]:
     if not tree:
         return leaves
 
-    if "rules" in tree and isinstance(tree["rules"], list):
-        for child in tree["rules"]:
+    children = tree.get("rules") or tree.get("children")
+    if children and isinstance(children, list):
+        for child in children:
             leaves.extend(extract_tree_leaves(child))
-    elif tree.get("type"):
+    elif tree.get("type") or tree.get("indicator") or tree.get("pattern") or tree.get("price"):
         leaves.append(tree)
 
     return leaves

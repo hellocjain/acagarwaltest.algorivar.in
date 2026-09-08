@@ -165,3 +165,43 @@ def test_corrupted_ohlc_values_coerced():
     res = evaluate_condition_tree(tree, df_corrupt, candle_idx=-1)
     assert res.passed is True
     assert res.diagnostics[0]["passed"] is True
+
+
+def test_bearish_supertrend_and_children_syntax():
+    """Verify that AST trees using 'children', 'operator', and 'value': 'bearish' evaluate correctly."""
+    # Downward trending data to trigger bearish Supertrend
+    closes = [200.0 - i * 3.0 for i in range(40)]
+    highs = [c + 2.0 for c in closes]
+    lows = [c - 2.0 for c in closes]
+    opens = [c + 1.0 for c in closes]
+    df_downtrend = pd.DataFrame({"open": opens, "high": highs, "low": lows, "close": closes, "volume": 1000})
+
+    tree = {
+        "op": "AND",
+        "children": [
+            {
+                "indicator": "supertrend",
+                "interval": "30m",
+                "params": {"period": 10, "multiplier": 3},
+                "output": "trend",
+                "operator": "==",
+                "value": "bearish",
+            },
+            {
+                "indicator": "rsi",
+                "interval": "30m",
+                "params": {"period": 14},
+                "output": "rsi",
+                "operator": "<",
+                "value": 40.0,
+            },
+        ],
+    }
+
+    res = evaluate_condition_tree(tree, df_downtrend, candle_idx=-1)
+    assert res.passed is True
+    assert len(res.diagnostics) == 2
+    assert res.diagnostics[0]["actual_value"] == "Bearish"
+    assert res.diagnostics[0]["passed"] is True
+    assert res.diagnostics[1]["passed"] is True
+

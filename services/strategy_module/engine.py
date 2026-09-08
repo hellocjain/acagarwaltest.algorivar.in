@@ -349,6 +349,12 @@ def start_run(
                 f"Universal Scanner Agent started in {mode} mode ({trigger_source})",
                 run_id=run_id,
             )
+            try:
+                from services.strategy_module import scheduler
+                scheduler.sync_strategy_jobs(strategy_id)
+            except Exception:
+                logger.exception("Could not sync scanner scheduler jobs for strategy %s", strategy_id)
+
             from services.strategy_module.scanner_runner import evaluate_scanner_strategy
 
             evaluate_scanner_strategy(strategy_id, user_id, mode=mode, run_id=run_id)
@@ -1980,10 +1986,13 @@ def _finalise(run_id: int, strategy_id: int, user_id: str, reason: str, message:
             logger.exception("Could not push the terminal frame for run %s", run_id)
     finally:
         _unactionable_runs.discard(run_id)
-        # Cleanup belongs only to the transactional winner, even when an
-        # optional event/broadcast fails afterwards.
         _unsubscribe_run(run_id)
         state.clear_run_state(run_id)
+        try:
+            from services.strategy_module import scheduler
+            scheduler.sync_strategy_jobs(strategy_id)
+        except Exception:
+            pass
 
     # Arm the webhook cooling-off window for every stop, not just the ones a
     # webhook asked for. A strategy stopped by its own risk rules, by the

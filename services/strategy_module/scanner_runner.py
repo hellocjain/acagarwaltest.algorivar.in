@@ -129,6 +129,61 @@ class ScannerRunner:
             exit_r = {}
         self.exit_rules = exit_r or {"target_pct": 10.0, "stop_loss_pct": 5.0, "rsi_exit": 75.0}
 
+    @property
+    def is_bearish(self) -> bool:
+        """Determines if the strategy is oriented towards shorting/bearish entries."""
+        meta_dir = str(self.metadata.get("direction") or "").lower()
+        if meta_dir in ("bearish", "short", "sell"):
+            return True
+        strat_dir = str(self.strategy_dict.get("direction") or "").lower()
+        if strat_dir in ("bearish", "short"):
+            return True
+        name = str(self.strategy_dict.get("name") or "").lower()
+        if "bearish" in name or "short" in name:
+            return True
+        leaves = extract_tree_leaves(self.condition_tree)
+        for leaf in leaves:
+            val = str(leaf.get("value") or "").lower()
+            if val in ("bearish", "bear"):
+                return True
+        return False
+
+    def _fetch_candles(self, symbol: str) -> Any | None:
+        """Fetch recent candles for a symbol using history service."""
+        try:
+            import pandas as pd
+            from datetime import datetime, timedelta
+            from database.token_db import get_token
+            from services.history_service import get_history
+            from services.strategy_module.engine import _api_key_for
+
+            api_key = _api_key_for(self.user_id)
+            if not api_key:
+                return None
+
+            exchange = "NSE"
+            resolved_sym = symbol
+            if get_token(symbol, exchange) is None and get_token(f"{symbol}-EQ", exchange) is not None:
+                resolved_sym = f"{symbol}-EQ"
+
+            end_d = datetime.now().strftime("%Y-%m-%d")
+            start_d = (datetime.now() - timedelta(days=15)).strftime("%Y-%m-%d")
+
+            ok, resp, _ = get_history(
+                symbol=resolved_sym,
+                exchange=exchange,
+                interval=self.timeframe,
+                start_date=start_d,
+                end_date=end_d,
+                api_key=api_key,
+            )
+            if not ok or not resp.get("data"):
+                return None
+            return pd.DataFrame(resp["data"])
+        except Exception as err:
+            logger.debug("Failed fetching candles for %s: %s", symbol, err)
+            return None
+
     def log_decision(self, kind: str, message: str, severity: str = "info", payload: dict | None = None) -> None:
         """Record an entry in the Live Decision Journal (sm_strategy_event)."""
         sm_store.record_event(
@@ -155,14 +210,38 @@ class ScannerRunner:
             severity="info",
         )
 
-        # In offline or mock mode, or when live broker feeds provide candle data
         matches = mock_matches or []
+        if not matches and mock_matches is None and self.condition_tree and self.symbols:
+            # Live scan over universe symbols
+            scan_limit = min(len(self.symbols), int(self.metadata.get("scan_batch_limit", 25)))
+            for sym in self.symbols[:scan_limit]:
+                df = self._fetch_candles(sym)
+                if df is None or len(df) < 5:
+                    continue
+                eval_res = evaluate_condition_tree(self.condition_tree, df, candle_idx=-1)
+                if eval_res.passed:
+                    ltp = float(df.iloc[-1]["close"])
+                    diag_vals = {d.get("label"): d.get("actual_value") for d in eval_res.diagnostics}
+                    matches.append({
+                        "symbol": sym,
+                        "ltp": ltp,
+                        "diagnostics": diag_vals,
+                        "summary": eval_res.summary,
+                    })
+                if len(matches) >= self.max_concurrent_positions:
+                    break
+
         if not matches and mock_matches is None:
-            # Simulated realistic match for testing/paper scanning if no mock passed
-            matches = [
-                {"symbol": "TATAMOTORS", "ltp": 982.50, "rsi": 22.8, "supertrend": "bullish"},
-                {"symbol": "INFY", "ltp": 1824.00, "rsi": 24.1, "supertrend": "bullish"},
-            ]
+            # Simulated realistic match for testing/paper scanning if no mock passed and broker offline
+            if self.is_bearish:
+                matches = [
+                    {"symbol": "INFY", "ltp": 1085.00, "rsi": 31.0, "supertrend": "bearish"},
+                ]
+            else:
+                matches = [
+                    {"symbol": "TATAMOTORS", "ltp": 982.50, "rsi": 22.8, "supertrend": "bullish"},
+                    {"symbol": "INFY", "ltp": 1824.00, "rsi": 24.1, "supertrend": "bullish"},
+                ]
 
         results = {
             "scanned_count": len(self.symbols),
@@ -268,18 +347,24 @@ class ScannerRunner:
                     fut_res = resolve_stock_future(symbol=sym, ltp=ltp, lots=1)
                     stock_tgt_pct = _get_exit_pct(self.exit_rules, ["target_pct", "target_profit_pct", "target", "take_profit_pct"], 10.0)
                     stock_sl_pct = _get_exit_pct(self.exit_rules, ["stop_loss_pct", "stop_loss", "stoploss", "sl_pct"], 5.0)
-                    fut_tgt = round(ltp * (1.0 + stock_tgt_pct / 100.0), 2)
-                    fut_sl = round(ltp * (1.0 - stock_sl_pct / 100.0), 2)
+                    action = "SELL" if self.is_bearish else "BUY"
+                    if action == "SELL":
+                        fut_tgt = round(ltp * (1.0 - stock_tgt_pct / 100.0), 2)
+                        fut_sl = round(ltp * (1.0 + stock_sl_pct / 100.0), 2)
+                    else:
+                        fut_tgt = round(ltp * (1.0 + stock_tgt_pct / 100.0), 2)
+                        fut_sl = round(ltp * (1.0 - stock_sl_pct / 100.0), 2)
 
                     order_msg = (
-                        f"Placed BUY MIS for 1 lot ({fut_res.quantity} qty) of {fut_res.symbol} @ ₹{ltp:,.2f} "
+                        f"Placed {action} MIS for 1 lot ({fut_res.quantity} qty) of {fut_res.symbol} @ ₹{ltp:,.2f} "
                         f"(Est. Margin: ₹{fut_res.estimated_margin_required:,.2f}). "
-                        f"Target: ₹{fut_tgt:,.2f} (+{stock_tgt_pct:.0f}%), SL: ₹{fut_sl:,.2f} (-{stock_sl_pct:.0f}%)."
+                        f"Target: ₹{fut_tgt:,.2f} ({'-' if action == 'SELL' else '+'}{stock_tgt_pct:.0f}%), SL: ₹{fut_sl:,.2f} ({'+' if action == 'SELL' else '-'}{stock_sl_pct:.0f}%)."
                     )
                     payload = {
                         "instrument": "futures",
                         "contract_symbol": fut_res.symbol,
                         "underlying": sym,
+                        "action": action,
                         "expiry": fut_res.expiry,
                         "quantity": fut_res.quantity,
                         "price": ltp,
@@ -296,15 +381,63 @@ class ScannerRunner:
                     invested = qty * ltp
                     stock_tgt_pct = _get_exit_pct(self.exit_rules, ["target_pct", "target_profit_pct", "target", "take_profit_pct"], 10.0)
                     stock_sl_pct = _get_exit_pct(self.exit_rules, ["stop_loss_pct", "stop_loss", "stoploss", "sl_pct"], 5.0)
-                    tgt_price = round(ltp * (1.0 + stock_tgt_pct / 100.0), 2)
-                    sl_price = round(ltp * (1.0 - stock_sl_pct / 100.0), 2)
+                    action = "SELL" if self.is_bearish else "BUY"
+                    if action == "SELL":
+                        tgt_price = round(ltp * (1.0 - stock_tgt_pct / 100.0), 2)
+                        sl_price = round(ltp * (1.0 + stock_sl_pct / 100.0), 2)
+                    else:
+                        tgt_price = round(ltp * (1.0 + stock_tgt_pct / 100.0), 2)
+                        sl_price = round(ltp * (1.0 - stock_sl_pct / 100.0), 2)
 
                     order_msg = (
-                        f"Placed BUY {self.product_type} for {qty} shares of {sym} @ ₹{ltp:,.2f} "
-                        f"(Allocated: ₹{invested:,.2f}). Target: ₹{tgt_price:,.2f} (+{stock_tgt_pct:.0f}%), "
-                        f"SL: ₹{sl_price:,.2f} (-{stock_sl_pct:.0f}%)."
+                        f"Placed {action} {self.product_type} for {qty} shares of {sym} @ ₹{ltp:,.2f} "
+                        f"(Allocated: ₹{invested:,.2f}). Target: ₹{tgt_price:,.2f} ({'-' if action == 'SELL' else '+'}{stock_tgt_pct:.0f}%), "
+                        f"SL: ₹{sl_price:,.2f} ({'+' if action == 'SELL' else '-'}{stock_sl_pct:.0f}%)."
                     )
-                    payload = {"instrument": "cash", "symbol": sym, "qty": qty, "price": ltp, "invested": invested, "target": tgt_price, "stoploss": sl_price}
+                    payload = {"instrument": "cash", "symbol": sym, "action": action, "qty": qty, "price": ltp, "invested": invested, "target": tgt_price, "stoploss": sl_price}
+
+                    try:
+                        from services.strategy_module import order_dispatch
+                        from services.strategy_module.engine import _api_key_for
+                        from database.token_db import get_token
+
+                        api_key = _api_key_for(self.user_id) or "sandbox_key"
+                        order_sym = sym
+                        if get_token(sym, "NSE") is None and get_token(f"{sym}-EQ", "NSE") is not None:
+                            order_sym = f"{sym}-EQ"
+
+                        order = order_dispatch.build_order(
+                            symbol=order_sym,
+                            exchange="NSE",
+                            action=action,
+                            quantity=qty,
+                            product=self.product_type,
+                            strategy_name=self.strategy_dict.get("name", "Scanner Agent"),
+                            pricetype="MARKET",
+                        )
+                        if self.run_id:
+                            row_id = sm_store.record_order(
+                                run_id=self.run_id,
+                                leg_id=0,
+                                kind="entry",
+                                position_ref=f"SCAN_{sym}",
+                                symbol=order["symbol"],
+                                exchange=order["exchange"],
+                                action=order["action"],
+                                qty=int(order["quantity"]),
+                                product=order["product"],
+                                pricetype=order["pricetype"],
+                                price=ltp,
+                                status="pending",
+                            )
+                            disp_res = order_dispatch.dispatch_order(mode=self.mode, api_key=api_key, order=order)
+                            if disp_res.ok:
+                                sm_store.update_order(row_id, status="open", broker_order_id=disp_res.broker_order_id)
+                            else:
+                                sm_store.update_order(row_id, status="rejected", reject_reason=disp_res.error)
+                    except Exception as err:
+                        logger.warning("Order dispatch failed for %s: %s", sym, err)
+
                     self.log_decision(kind="order_filled", message=order_msg, severity="success", payload=payload)
                     results["orders_placed"].append(payload)
 

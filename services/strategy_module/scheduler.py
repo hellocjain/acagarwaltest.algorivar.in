@@ -197,6 +197,10 @@ def stop_job_id(strategy_id: int) -> str:
     return f"{JOB_PREFIX}{strategy_id}:stop"
 
 
+def scan_job_id(strategy_id: int) -> str:
+    return f"{JOB_PREFIX}{strategy_id}:scan"
+
+
 def _strategy_id_from_job_id(job_id: str) -> int | None:
     """The strategy id encoded in one of our job ids, or None."""
     parts = str(job_id).split(":")
@@ -275,40 +279,80 @@ def _planned_jobs(row: store.SmStrategy) -> list[dict[str, Any]]:
     the answer for a config too broken to build a trigger from.
     """
     config = row.scheduler if isinstance(row.scheduler, dict) else None
-    label = f"strategy {row.id} scheduler"
-    scheduled = bool(config and config.get("enabled"))
+    if isinstance(row.scheduler, str):
+        import json
+        try:
+            config = json.loads(row.scheduler)
+        except Exception:
+            config = None
 
-    day_of_week = _cron_days(config.get("days"), f"{label}.days") if scheduled else None
+    label = f"strategy {row.id} scheduler"
+    scheduled = bool(
+        config and (
+            config.get("enabled")
+            or ((row.strategy_kind or "batch") == "scanner" and (config.get("entry_time") or config.get("start_time")))
+        )
+    )
+
+    raw_days = (config.get("days") or config.get("active_days")) if config else None
+    day_of_week = _cron_days(raw_days, f"{label}.days") if (scheduled and raw_days) else None
 
     planned: list[dict[str, Any]] = []
 
-    # The square-off from exit_time has to survive both of the early returns
-    # this function used to take. An intraday strategy that sets exit_time and
-    # leaves the scheduler switched off is the default configuration, and it
-    # got no stop job at all: nothing squared the position off and it stayed
-    # open past the exit the user configured, until a manual stop or the EOD
-    # path caught it. exit_time is the strategy's own statement of when it must
-    # be flat, so it is honoured whether or not anything else is scheduled.
-    if not scheduled or not day_of_week:
-        if row.exit_time is None:
-            return []
-        exit_at = _parse_hhmm(row.exit_time, f"strategy {row.id} exit_time")
-        if exit_at is None:
-            return []
-        return [
-            {
-                "job_id": stop_job_id(row.id),
-                "name": f"Strategy {row.id} scheduled square-off (exit_time)",
-                "func": run_scheduled_stop,
-                # No scheduler config to take days from, so every trading day.
-                # A holiday costs one no-op on a strategy that is not running.
-                "day_of_week": _WEEKDAYS,
-                "hour": exit_at[0],
-                "minute": exit_at[1],
-            }
-        ]
+    # Periodic scanner job for active running scanner agents
+    if (row.strategy_kind or "batch") == "scanner" and row.status == "running":
+        meta = config.get("agent_metadata") if config else {}
+        if isinstance(meta, str):
+            import json
+            try:
+                meta = json.loads(meta)
+            except Exception:
+                meta = {}
+        tf = str(meta.get("timeframe") or "5m").lower()
+        if "30" in tf:
+            cron_min = "15,45"
+            cron_hr = "9-15"
+        elif "15" in tf:
+            cron_min = "0,15,30,45"
+            cron_hr = "9-15"
+        elif "1h" in tf or "60" in tf:
+            cron_min = "15"
+            cron_hr = "10-15"
+        else:
+            cron_min = "*/5"
+            cron_hr = "9-15"
 
-    start_at = _parse_hhmm(config.get("start_time"), f"{label}.start_time")
+        days_sched = day_of_week or _WEEKDAYS
+        planned.append({
+            "job_id": scan_job_id(row.id),
+            "name": f"Strategy {row.id} scheduled scanner ({tf})",
+            "func": run_scheduled_scan,
+            "day_of_week": days_sched,
+            "hour": cron_hr,
+            "minute": cron_min,
+        })
+
+    # The square-off from exit_time has to survive both of the early returns
+    # this function used to take.
+    if not scheduled or not day_of_week:
+        exit_val = row.exit_time or (config.get("exit_time") if config else None)
+        if exit_val is None:
+            return planned
+        exit_at = _parse_hhmm(exit_val, f"strategy {row.id} exit_time")
+        if exit_at is None:
+            return planned
+        planned.append({
+            "job_id": stop_job_id(row.id),
+            "name": f"Strategy {row.id} scheduled square-off (exit_time)",
+            "func": run_scheduled_stop,
+            "day_of_week": _WEEKDAYS,
+            "hour": exit_at[0],
+            "minute": exit_at[1],
+        })
+        return planned
+
+    start_val = config.get("start_time") or config.get("entry_time") or row.entry_time
+    start_at = _parse_hhmm(start_val, f"{label}.start_time")
     if start_at is None:
         logger.warning("%s has no usable start_time; no start job was installed", label)
     else:
@@ -323,17 +367,9 @@ def _planned_jobs(row: store.SmStrategy) -> list[dict[str, Any]]:
             }
         )
 
-    stop_at = _parse_hhmm(config.get("auto_stop_time"), f"{label}.auto_stop_time")
+    stop_val = config.get("auto_stop_time") or config.get("exit_time") or row.exit_time
+    stop_at = _parse_hhmm(stop_val, f"{label}.auto_stop_time")
     stop_source = "scheduler.auto_stop_time"
-
-    # The auto-stop job is installed only from scheduler.auto_stop_time in the
-    # module this is ported from, so an intraday strategy that sets exit_time
-    # and leaves auto_stop_time blank got no square-off. exit_time fills in
-    # whenever the scheduler config does not give one; see the block above for
-    # the case where the scheduler is off entirely.
-    if stop_at is None and row.exit_time is not None:
-        stop_at = _parse_hhmm(row.exit_time, f"strategy {row.id} exit_time")
-        stop_source = "exit_time"
 
     if stop_at is None:
         logger.debug("%s has no auto stop time and no exit_time; no stop job installed", label)
@@ -387,7 +423,7 @@ def sync_strategy_jobs(strategy_id: int) -> list[str]:
     planned = _planned_jobs(row) if row is not None else []
     wanted = {job["job_id"] for job in planned}
 
-    for job_id in (start_job_id(strategy_id), stop_job_id(strategy_id)):
+    for job_id in (start_job_id(strategy_id), stop_job_id(strategy_id), scan_job_id(strategy_id)):
         if job_id not in wanted:
             _remove_job(scheduler, job_id)
 
@@ -411,11 +447,11 @@ def sync_strategy_jobs(strategy_id: int) -> list[str]:
             )
             installed.append(job["job_id"])
             logger.info(
-                "Scheduled %s on %s at %02d:%02d IST",
+                "Scheduled %s on %s at %s:%s IST",
                 job["job_id"],
                 job["day_of_week"],
-                job["hour"],
-                job["minute"],
+                str(job["hour"]),
+                str(job["minute"]),
             )
         except Exception:
             logger.exception("Could not install scheduler job %s", job["job_id"])
@@ -639,6 +675,28 @@ def run_scheduled_stop(strategy_id: int) -> None:
             logger.error("Scheduled square-off of strategy %s failed: %s", strategy_id, error)
     except Exception:
         logger.exception("Scheduled stop failed for strategy %s", strategy_id)
+    finally:
+        from utils.db_sessions import remove_all_scoped_sessions
+
+        remove_all_scoped_sessions()
+
+
+def run_scheduled_scan(strategy_id: int) -> None:
+    """Execute a periodic scanner round for an active running scanner agent."""
+    try:
+        row = store.get_strategy_unscoped(strategy_id)
+        if row is None or row.status != "running" or not row.current_run_id:
+            return
+
+        from services.strategy_module.scanner_runner import evaluate_scanner_strategy
+
+        run_id = int(row.current_run_id)
+        run_row = store.get_run_unscoped(run_id) if hasattr(store, "get_run_unscoped") else None
+        mode = getattr(run_row, "mode", "sandbox") if run_row else "sandbox"
+        logger.info("Executing scheduled scan round for strategy %s (run %s)", strategy_id, run_id)
+        evaluate_scanner_strategy(strategy_id, row.user_id, mode=mode, run_id=run_id)
+    except Exception:
+        logger.exception("Scheduled scan failed for strategy %s", strategy_id)
     finally:
         from utils.db_sessions import remove_all_scoped_sessions
 
