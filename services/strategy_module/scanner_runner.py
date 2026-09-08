@@ -251,7 +251,21 @@ class ScannerRunner:
         }
 
         if matches:
-            match_summary = ", ".join([f"{m['symbol']} (RSI: {m['rsi']}, Supertrend: {m['supertrend']})" for m in matches])
+            def _format_match(m):
+                diag = m.get("diagnostics")
+                if diag:
+                    details = ", ".join(f"{k}: {v}" for k, v in diag.items() if k)
+                    return f"{m['symbol']} ({details})" if details else f"{m['symbol']} (LTP: {m.get('ltp')})"
+                parts = []
+                if "rsi" in m:
+                    parts.append(f"RSI: {m['rsi']}")
+                if "supertrend" in m:
+                    parts.append(f"Supertrend: {m['supertrend']}")
+                if "ltp" in m and not parts:
+                    parts.append(f"LTP: {m['ltp']}")
+                return f"{m['symbol']} ({', '.join(parts)})" if parts else str(m.get("symbol"))
+
+            match_summary = ", ".join([_format_match(m) for m in matches])
             self.log_decision(
                 kind="entry_gate_matched",
                 message=f"Found {len(matches)} stocks matching criteria: {match_summary}.",
