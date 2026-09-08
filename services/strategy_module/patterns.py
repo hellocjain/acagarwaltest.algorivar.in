@@ -38,17 +38,21 @@ SUPPORTED_PATTERNS = {
 
 
 def _normalize_ohlc(df: pd.DataFrame) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series]:
-    """Extract and normalize OHLC column names (case-insensitive)."""
+    """Extract and normalize OHLC column names (case-insensitive) with NaN resilience."""
+    if df is None or len(df) == 0:
+        empty = pd.Series(dtype=float)
+        return empty, empty, empty, empty
+
     cols = {c.lower(): c for c in df.columns}
     required = ["open", "high", "low", "close"]
     missing = [r for r in required if r not in cols]
     if missing:
         raise ValueError(f"DataFrame missing required OHLC columns: {missing}")
 
-    o = df[cols["open"]].astype(float)
-    h = df[cols["high"]].astype(float)
-    l = df[cols["low"]].astype(float)
-    c = df[cols["close"]].astype(float)
+    o = pd.to_numeric(df[cols["open"]], errors="coerce").fillna(0.0)
+    h = pd.to_numeric(df[cols["high"]], errors="coerce").fillna(0.0)
+    l = pd.to_numeric(df[cols["low"]], errors="coerce").fillna(0.0)
+    c = pd.to_numeric(df[cols["close"]], errors="coerce").fillna(0.0)
     return o, h, l, c
 
 
@@ -312,19 +316,23 @@ def evaluate_pattern(df: pd.DataFrame, pattern_name: str, candle_idx: int = -1) 
         pattern_name: Name of pattern (case-insensitive, e.g. 'HAMMER', 'BULLISH_ENGULFING').
         candle_idx: Index of candle to inspect (-1 for most recently completed candle).
     """
-    clean_name = pattern_name.upper().strip()
-    if clean_name not in PATTERN_DISPATCH:
-        raise ValueError(f"Unknown candlestick pattern '{pattern_name}'. Supported: {sorted(SUPPORTED_PATTERNS)}")
+    if df is None or len(df) == 0:
+        return False
 
-    func = PATTERN_DISPATCH[clean_name]
-    series = func(df)
-    if len(series) == 0:
+    clean_name = pattern_name.upper().strip().replace(" ", "_").replace("-", "_")
+    if clean_name not in PATTERN_DISPATCH:
+        logger.warning("Unknown candlestick pattern requested: %s", pattern_name)
         return False
 
     try:
+        func = PATTERN_DISPATCH[clean_name]
+        series = func(df)
+        if len(series) == 0:
+            return False
         val = series.iloc[candle_idx]
         return bool(val) if not pd.isna(val) else False
-    except IndexError:
+    except (IndexError, KeyError, ValueError) as err:
+        logger.debug("Candlestick pattern %s evaluation failed gracefully: %s", clean_name, err)
         return False
 
 

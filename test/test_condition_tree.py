@@ -110,3 +110,58 @@ def test_legacy_rules_conversion():
     types = [r["type"] for r in ast["rules"]]
     assert "indicator" in types
     assert "candlestick" in types
+
+
+def test_short_series_does_not_crash_rsi_or_supertrend():
+    # 3 bars: insufficient for RSI(14) or Supertrend(10)
+    df_short = pd.DataFrame({
+        "open": [100.0, 101.0, 102.0],
+        "high": [102.0, 103.0, 104.0],
+        "low": [99.0, 100.0, 101.0],
+        "close": [101.0, 102.0, 103.0],
+        "volume": [1000, 1100, 1200],
+    })
+    tree = {
+        "op": "AND",
+        "rules": [
+            {"type": "indicator", "indicator": "RSI", "params": {"period": 14}, "comp": "<", "value": 25.0},
+            {"type": "candlestick", "pattern": "morning_star"},
+        ],
+    }
+    res = evaluate_condition_tree(tree, df_short, candle_idx=-1)
+    assert res.passed is False
+    assert len(res.diagnostics) == 2
+    assert res.diagnostics[0]["actual_value"] == "Waiting for bars"
+    assert res.diagnostics[1]["passed"] is False
+
+
+def test_empty_dataframe_safe_handling():
+    empty_df = pd.DataFrame()
+    tree = {
+        "op": "AND",
+        "rules": [
+            {"type": "indicator", "indicator": "RSI", "params": {"period": 14}, "comp": "<", "value": 25.0},
+        ],
+    }
+    res = evaluate_condition_tree(tree, empty_df)
+    assert res.passed is False
+    assert res.diagnostics == []
+
+
+def test_corrupted_ohlc_values_coerced():
+    df_corrupt = pd.DataFrame({
+        "open": [100.0, "null", 102.0],
+        "high": [102.0, 103.0, 104.0],
+        "low": [99.0, None, 101.0],
+        "close": [101.0, 102.0, 103.0],
+        "volume": [1000, 1100, 1200],
+    })
+    tree = {
+        "op": "AND",
+        "rules": [
+            {"type": "price", "field": "close", "comp": ">", "value": 100.0},
+        ],
+    }
+    res = evaluate_condition_tree(tree, df_corrupt, candle_idx=-1)
+    assert res.passed is True
+    assert res.diagnostics[0]["passed"] is True

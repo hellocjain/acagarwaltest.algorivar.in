@@ -58,7 +58,7 @@ def _get_series(df: pd.DataFrame, col: str = "close") -> pd.Series:
     target = col_map.get(col.lower(), col_map.get("close"))
     if not target:
         raise ValueError(f"Column '{col}' not found in DataFrame.")
-    return df[target].astype(float)
+    return pd.to_numeric(df[target], errors="coerce").fillna(0.0)
 
 
 def compute_indicator_series(df: pd.DataFrame, name: str, params: dict[str, Any] | None = None, field_name: str | None = None) -> pd.Series:
@@ -67,76 +67,92 @@ def compute_indicator_series(df: pd.DataFrame, name: str, params: dict[str, Any]
     p = params or {}
     c = _get_series(df, "close")
 
-    if clean_name == "rsi":
-        period = int(p.get("period") or p.get("length") or 14)
-        raw = ta.rsi(c, period=period)
-        return pd.Series(raw, index=df.index)
+    try:
+        if clean_name == "rsi":
+            period = int(p.get("period") or p.get("length") or 14)
+            if len(c) <= period:
+                return pd.Series(np.nan, index=df.index)
+            raw = ta.rsi(c, period=period)
+            return pd.Series(raw, index=df.index)
 
-    elif clean_name == "ema":
-        period = int(p.get("period") or p.get("length") or 9)
-        raw = ta.ema(c, period=period)
-        return pd.Series(raw, index=df.index)
+        elif clean_name == "ema":
+            period = int(p.get("period") or p.get("length") or 9)
+            if len(c) < period:
+                return pd.Series(np.nan, index=df.index)
+            raw = ta.ema(c, period=period)
+            return pd.Series(raw, index=df.index)
 
-    elif clean_name == "sma":
-        period = int(p.get("period") or p.get("length") or 20)
-        raw = ta.sma(c, period=period)
-        return pd.Series(raw, index=df.index)
+        elif clean_name == "sma":
+            period = int(p.get("period") or p.get("length") or 20)
+            if len(c) < period:
+                return pd.Series(np.nan, index=df.index)
+            raw = ta.sma(c, period=period)
+            return pd.Series(raw, index=df.index)
 
-    elif clean_name == "supertrend":
-        h = _get_series(df, "high")
-        l = _get_series(df, "low")
-        period = int(p.get("period") or p.get("length") or 10)
-        mult = float(p.get("multiplier") or 3.0)
-        st_val, st_dir = ta.supertrend(h, l, c, period=period, multiplier=mult)
-        if field_name == "direction":
-            return pd.Series(st_dir, index=df.index)
-        return pd.Series(st_val, index=df.index)
+        elif clean_name == "supertrend":
+            h = _get_series(df, "high")
+            l = _get_series(df, "low")
+            period = int(p.get("period") or p.get("length") or 10)
+            if len(c) <= period:
+                return pd.Series(np.nan, index=df.index)
+            mult = float(p.get("multiplier") or 3.0)
+            st_val, st_dir = ta.supertrend(h, l, c, period=period, multiplier=mult)
+            if field_name == "direction":
+                return pd.Series(st_dir, index=df.index)
+            return pd.Series(st_val, index=df.index)
 
-    elif clean_name == "macd":
-        fast = int(p.get("fast") or 12)
-        slow = int(p.get("slow") or 26)
-        sig = int(p.get("signal") or 9)
-        macd_line, sig_line, hist = ta.macd(c, fast_period=fast, slow_period=slow, signal_period=sig)
-        if field_name == "signal":
-            return pd.Series(sig_line, index=df.index)
-        elif field_name == "hist" or field_name == "histogram":
-            return pd.Series(hist, index=df.index)
-        return pd.Series(macd_line, index=df.index)
+        elif clean_name == "macd":
+            fast = int(p.get("fast") or 12)
+            slow = int(p.get("slow") or 26)
+            sig = int(p.get("signal") or 9)
+            if len(c) <= slow:
+                return pd.Series(np.nan, index=df.index)
+            macd_line, sig_line, hist = ta.macd(c, fast_period=fast, slow_period=slow, signal_period=sig)
+            if field_name == "signal":
+                return pd.Series(sig_line, index=df.index)
+            elif field_name == "hist" or field_name == "histogram":
+                return pd.Series(hist, index=df.index)
+            return pd.Series(macd_line, index=df.index)
 
-    elif clean_name in ("bbands", "bollinger"):
-        period = int(p.get("period") or 20)
-        std = float(p.get("std_dev") or 2.0)
-        upper, mid, lower = ta.bbands(c, period=period, std_dev=std)
-        if field_name == "upper":
-            return pd.Series(upper, index=df.index)
-        elif field_name == "lower":
-            return pd.Series(lower, index=df.index)
-        return pd.Series(mid, index=df.index)
+        elif clean_name in ("bbands", "bollinger"):
+            period = int(p.get("period") or 20)
+            std = float(p.get("std_dev") or 2.0)
+            if len(c) <= period:
+                return pd.Series(np.nan, index=df.index)
+            upper, mid, lower = ta.bbands(c, period=period, std_dev=std)
+            if field_name == "upper":
+                return pd.Series(upper, index=df.index)
+            elif field_name == "lower":
+                return pd.Series(lower, index=df.index)
+            return pd.Series(mid, index=df.index)
 
-    elif clean_name == "vwap":
-        h = _get_series(df, "high")
-        l = _get_series(df, "low")
-        v = _get_series(df, "volume")
-        raw = ta.vwap(h, l, c, v)
-        return pd.Series(raw, index=df.index)
+        elif clean_name == "vwap":
+            h = _get_series(df, "high")
+            l = _get_series(df, "low")
+            v = _get_series(df, "volume")
+            raw = ta.vwap(h, l, c, v)
+            return pd.Series(raw, index=df.index)
 
-    elif clean_name == "atr":
-        h = _get_series(df, "high")
-        l = _get_series(df, "low")
-        period = int(p.get("period") or 14)
-        raw = ta.atr(h, l, c, period=period)
-        return pd.Series(raw, index=df.index)
+        elif clean_name == "atr":
+            h = _get_series(df, "high")
+            l = _get_series(df, "low")
+            period = int(p.get("period") or 14)
+            if len(c) <= period:
+                return pd.Series(np.nan, index=df.index)
+            raw = ta.atr(h, l, c, period=period)
+            return pd.Series(raw, index=df.index)
 
-    # Generic fallback: look up directly on openalgo.ta
-    if hasattr(ta, clean_name):
-        func = getattr(ta, clean_name)
-        try:
+        # Generic fallback: look up directly on openalgo.ta
+        if hasattr(ta, clean_name):
+            func = getattr(ta, clean_name)
             raw = func(c, **p)
             if isinstance(raw, tuple):
                 return pd.Series(raw[0], index=df.index)
             return pd.Series(raw, index=df.index)
-        except Exception as err:
-            logger.warning("Could not execute generic ta.%s: %s", clean_name, err)
+
+    except Exception as err:
+        logger.warning("Could not calculate indicator %s (%s): %s", clean_name, p, err)
+        return pd.Series(np.nan, index=df.index)
 
     raise ValueError(f"Unsupported indicator '{name}' in condition evaluator.")
 
@@ -166,15 +182,28 @@ def _eval_indicator_leaf(leaf: dict[str, Any], df: pd.DataFrame, idx: int) -> tu
             passed=passed,
         )
 
-    # Standard numeric comparison
-    num_target = float(target_val) if target_val is not None else 0.0
-    actual_num = float(actual) if not pd.isna(actual) else 0.0
-    op_fn = COMP_OPS.get(comp, COMP_OPS["=="])
-    passed = op_fn(actual_num, num_target)
-
     # Format parameter string (e.g. RSI(14))
     param_str = f"({list(params.values())[0]})" if params else ""
     field_str = f".{field_name}" if field_name else ""
+
+    if pd.isna(actual):
+        label = f"{ind_name.upper()}{field_str}{param_str} {comp} {target_val}"
+        return False, DiagnosticLeaf(
+            node_type="indicator",
+            label=label,
+            actual_value="Waiting for bars",
+            comp=comp,
+            threshold=target_val,
+            passed=False,
+            details="Insufficient historical bars for indicator calculation",
+        )
+
+    # Standard numeric comparison
+    num_target = float(target_val) if target_val is not None else 0.0
+    actual_num = float(actual)
+    op_fn = COMP_OPS.get(comp, COMP_OPS["=="])
+    passed = bool(op_fn(actual_num, num_target))
+
     label = f"{ind_name.upper()}{field_str}{param_str} {comp} {num_target}"
 
     return passed, DiagnosticLeaf(
@@ -217,6 +246,18 @@ def _eval_indicator_cross_leaf(leaf: dict[str, Any], df: pd.DataFrame, idx: int)
     curr_l = left_series.iloc[idx]
     curr_r = right_series.iloc[idx]
 
+    label = f"{left_label} {comp.replace('_', ' ')} {right_label}"
+
+    if pd.isna(curr_l) or pd.isna(curr_r):
+        return False, DiagnosticLeaf(
+            node_type="indicator_cross",
+            label=label,
+            actual_value="Waiting for bars",
+            comp=comp,
+            threshold=f"{right_label}",
+            passed=False,
+        )
+
     # Needs at least 2 bars for crossover detection
     if idx == 0 or len(left_series) < 2:
         prev_l = curr_l
@@ -225,18 +266,21 @@ def _eval_indicator_cross_leaf(leaf: dict[str, Any], df: pd.DataFrame, idx: int)
         prev_l = left_series.iloc[idx - 1]
         prev_r = right_series.iloc[idx - 1]
 
+    if pd.isna(prev_l) or pd.isna(prev_r):
+        prev_l = curr_l
+        prev_r = curr_r
+
     if comp == "crosses_above":
-        passed = (prev_l <= prev_r) and (curr_l > curr_r)
+        passed = bool((prev_l <= prev_r) and (curr_l > curr_r))
     elif comp == "crosses_below":
-        passed = (prev_l >= prev_r) and (curr_l < curr_r)
+        passed = bool((prev_l >= prev_r) and (curr_l < curr_r))
     elif comp in ("is_above", ">", ">="):
-        passed = curr_l > curr_r
+        passed = bool(curr_l > curr_r)
     elif comp in ("is_below", "<", "<="):
-        passed = curr_l < curr_r
+        passed = bool(curr_l < curr_r)
     else:
         passed = False
 
-    label = f"{left_label} {comp.replace('_', ' ')} {right_label}"
     return passed, DiagnosticLeaf(
         node_type="indicator_cross",
         label=label,
@@ -249,7 +293,7 @@ def _eval_indicator_cross_leaf(leaf: dict[str, Any], df: pd.DataFrame, idx: int)
 
 def _eval_candlestick_leaf(leaf: dict[str, Any], df: pd.DataFrame, idx: int) -> tuple[bool, DiagnosticLeaf]:
     pattern = leaf.get("pattern") or leaf.get("name", "HAMMER")
-    passed = evaluate_pattern(df, pattern, candle_idx=idx)
+    passed = bool(evaluate_pattern(df, pattern, candle_idx=idx))
     label = f"{pattern.replace('_', ' ').title()} Candlestick"
     return passed, DiagnosticLeaf(
         node_type="candlestick",
@@ -278,8 +322,18 @@ def _eval_price_leaf(leaf: dict[str, Any], df: pd.DataFrame, idx: int) -> tuple[
         target = float(target_val) if target_val is not None else 0.0
         label = f"{field_col.upper()} {comp} {target}"
 
+    if pd.isna(curr_val) or pd.isna(target):
+        return False, DiagnosticLeaf(
+            node_type="price",
+            label=label,
+            actual_value="Waiting for price",
+            comp=comp,
+            threshold=target,
+            passed=False,
+        )
+
     op_fn = COMP_OPS.get(comp, COMP_OPS["=="])
-    passed = op_fn(curr_val, target)
+    passed = bool(op_fn(curr_val, target))
 
     return passed, DiagnosticLeaf(
         node_type="price",

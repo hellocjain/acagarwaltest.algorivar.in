@@ -90,6 +90,14 @@ interface CopilotMessage {
   time: string
 }
 
+function formatDiagnosticVal(val: unknown): string {
+  if (val === undefined || val === null || val === '') return '—'
+  if (typeof val === 'number') {
+    return Number.isInteger(val) ? val.toString() : val.toFixed(2)
+  }
+  return String(val)
+}
+
 export default function AgentDetails() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -820,10 +828,10 @@ export default function AgentDetails() {
                                 </span>
                               </td>
                               <td className="py-2.5 font-mono text-xs text-muted-foreground">
-                                {item.threshold !== undefined ? String(item.threshold) : '—'}
+                                {formatDiagnosticVal(item.threshold)}
                               </td>
                               <td className="py-2.5 font-mono text-xs text-foreground">
-                                {item.actual_value !== undefined ? String(item.actual_value) : 'Watching'}
+                                {formatDiagnosticVal(item.actual_value)}
                               </td>
                               <td className="py-2.5 text-right">
                                 <span
@@ -834,7 +842,7 @@ export default function AgentDetails() {
                                       : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
                                   )}
                                 >
-                                  {isPassed ? '● Passed' : '⏳ ' + String(item.actual_value || 'Watching')}
+                                  {isPassed ? '● Passed' : '⏳ ' + formatDiagnosticVal(item.actual_value || 'Watching')}
                                 </span>
                               </td>
                             </tr>

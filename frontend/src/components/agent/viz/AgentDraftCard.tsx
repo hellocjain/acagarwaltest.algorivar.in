@@ -39,6 +39,27 @@ export interface AgentDraftCardProps {
   className?: string
 }
 
+function extractLeafSummary(node: any): Array<{ label: string; type: string }> {
+  if (!node) return []
+  if (Array.isArray(node.rules)) {
+    return node.rules.flatMap((r: any) => extractLeafSummary(r))
+  }
+  if (node.type === 'indicator') {
+    const p = node.params ? Object.values(node.params)[0] : ''
+    return [{ label: `${node.indicator}${p ? `(${p})` : ''} ${node.comp || '<'} ${node.value}`, type: 'indicator' }]
+  }
+  if (node.type === 'candlestick') {
+    return [{ label: `${node.pattern?.replace('_', ' ').toLowerCase()} pattern`, type: 'candlestick' }]
+  }
+  if (node.type === 'indicator_cross') {
+    return [{ label: `${node.left?.indicator || 'Price'} ${node.comp} ${node.right?.indicator || 'MA'}`, type: 'cross' }]
+  }
+  if (node.type === 'price') {
+    return [{ label: `Price ${node.comp || '>'} ${node.value}`, type: 'price' }]
+  }
+  return [{ label: JSON.stringify(node), type: 'rule' }]
+}
+
 export function AgentDraftCard({ spec, className }: AgentDraftCardProps) {
   const navigate = useNavigate()
   const [deployState, setDeployState] = useState<'draft' | 'deploying' | 'running' | 'error'>('draft')
@@ -213,25 +234,16 @@ export function AgentDraftCard({ spec, className }: AgentDraftCardProps) {
               <span className="font-semibold text-foreground">CONDITION LOGIC (AST): </span>
               <div className="flex flex-wrap gap-1.5 pt-0.5">
                 <span className="inline-flex items-center rounded-md bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
-                  OP: {spec.condition_tree.op || 'AND'}
+                  TREE: {spec.condition_tree.op || 'AND'}
                 </span>
-                {Array.isArray(spec.condition_tree.rules) &&
-                  spec.condition_tree.rules.map((rule: any, idx: number) => (
-                    <span
-                      key={idx}
-                      className="inline-flex items-center rounded-md border border-border bg-background/80 px-2 py-0.5 text-[10px] font-mono text-foreground"
-                    >
-                      {rule.type === 'indicator'
-                        ? `${rule.indicator} ${rule.comp || '<'} ${rule.value}`
-                        : rule.type === 'candlestick'
-                        ? `${rule.pattern?.replace('_', ' ')}`
-                        : rule.type === 'indicator_cross'
-                        ? `${rule.left?.indicator || 'Price'} ${rule.comp} ${rule.right?.indicator || 'MA'}`
-                        : rule.op
-                        ? `Subtree (${rule.op})`
-                        : JSON.stringify(rule)}
-                    </span>
-                  ))}
+                {extractLeafSummary(spec.condition_tree).map((leaf, idx) => (
+                  <span
+                    key={idx}
+                    className="inline-flex items-center rounded-md border border-border bg-background/80 px-2 py-0.5 text-[10px] font-mono text-foreground"
+                  >
+                    {leaf.label}
+                  </span>
+                ))}
               </div>
             </div>
           )}
