@@ -430,25 +430,29 @@ class ScannerRunner:
                             pricetype="MARKET",
                         )
                         if self.run_id:
-                            row_id = sm_store.record_order(
+                            order_dict = {
+                                "position_ref": f"SCAN_{sym}",
+                                "symbol": order["symbol"],
+                                "exchange": order["exchange"],
+                                "action": order["action"],
+                                "qty": int(order["quantity"]),
+                                "product": order["product"],
+                                "pricetype": order["pricetype"],
+                                "price": ltp,
+                                "status": "pending",
+                            }
+                            row = sm_store.record_order(
                                 run_id=self.run_id,
                                 leg_id=0,
                                 kind="entry",
-                                position_ref=f"SCAN_{sym}",
-                                symbol=order["symbol"],
-                                exchange=order["exchange"],
-                                action=order["action"],
-                                qty=int(order["quantity"]),
-                                product=order["product"],
-                                pricetype=order["pricetype"],
-                                price=ltp,
-                                status="pending",
+                                order=order_dict,
                             )
                             disp_res = order_dispatch.dispatch_order(mode=self.mode, api_key=api_key, order=order)
-                            if disp_res.ok:
-                                sm_store.update_order(row_id, status="open", broker_order_id=disp_res.broker_order_id)
-                            else:
-                                sm_store.update_order(row_id, status="rejected", reject_reason=disp_res.error)
+                            if row:
+                                if disp_res.ok:
+                                    sm_store.update_order(row.id, status="open", broker_order_id=disp_res.broker_order_id)
+                                else:
+                                    sm_store.update_order(row.id, status="rejected", reject_reason=disp_res.error)
                     except Exception as err:
                         logger.warning("Order dispatch failed for %s: %s", sym, err)
 
