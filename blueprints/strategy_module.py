@@ -1846,6 +1846,23 @@ def list_checkpoints(sid):
     return _ok({"data": store.list_checkpoints(run_id, strategy_id=sid), "run_id": run_id})
 
 
+@strategy_module_bp.route("/api/strategies/<int:sid>/diagnostics", methods=["GET"])
+@check_session_validity
+@_api_limit
+def get_strategy_diagnostics(sid):
+    """Real-time condition tree diagnostics and pass/fail status."""
+    username, row, error = _resolve(sid)
+    if error:
+        return error
+    try:
+        from services.strategy_module.scanner_runner import ScannerRunner
+        runner = ScannerRunner(sid, username, mode="sandbox", run_id=row.current_run_id)
+        diagnostics = runner.get_live_condition_diagnostics()
+        return _ok({"data": diagnostics, "strategy_id": sid})
+    except Exception as exc:
+        return _ok({"data": [], "error": str(exc), "strategy_id": sid})
+
+
 # ---------------------------------------------------------------------------
 # Public webhook
 #

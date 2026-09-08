@@ -13,6 +13,11 @@ from datetime import datetime
 from typing import Any
 
 from database import strategy_module_db as sm_store
+from services.strategy_module.condition_tree import (
+    evaluate_condition_tree,
+    extract_tree_leaves,
+    legacy_rules_to_condition_tree,
+)
 from services.strategy_module.stock_derivatives import (
     resolve_stock_future,
     resolve_stock_option,
@@ -53,6 +58,7 @@ class ScannerRunner:
         self.max_concurrent_positions = int(self.metadata.get("max_concurrent_positions") or (3 if self.instrument_preference == "options" else 5))
         self.timeframe = self.metadata.get("timeframe", "5m")
         self.product_type = self.metadata.get("product_type", "CNC")
+        self.condition_tree = self.metadata.get("condition_tree") or legacy_rules_to_condition_tree(self.metadata.get("indicator_rules") or {})
         self.exit_rules = self.metadata.get("exit_rules") or {"target_pct": 10.0, "stop_loss_pct": 5.0, "rsi_exit": 75.0}
 
     def log_decision(self, kind: str, message: str, severity: str = "info", payload: dict | None = None) -> None:
@@ -315,6 +321,56 @@ class ScannerRunner:
             }
 
         return {"exit": False, "gate": None, "reason": "Holding position within risk bounds"}
+
+    def get_live_condition_diagnostics(self, df: Any = None) -> list[dict[str, Any]]:
+        """Compute or extract live pass/fail diagnostics for the agent's condition tree."""
+        if df is not None and len(df) > 0:
+            res = evaluate_condition_tree(self.condition_tree, df, candle_idx=-1)
+            return res.diagnostics
+
+        diagnostics: list[dict[str, Any]] = []
+        leaves = extract_tree_leaves(self.condition_tree)
+        for r in leaves:
+            rtype = r.get("type", "indicator")
+            if rtype == "indicator":
+                ind = r.get("indicator", "RSI").upper()
+                p = r.get("params", {})
+                param_str = f"({list(p.values())[0]})" if p else ""
+                diagnostics.append({
+                    "node_type": "indicator",
+                    "label": f"{ind}{param_str} {r.get('comp', '<')} {r.get('value')}",
+                    "actual_value": "Watching",
+                    "threshold": r.get("value"),
+                    "comp": r.get("comp"),
+                    "passed": False,
+                })
+            elif rtype == "candlestick":
+                pat = r.get("pattern", "HAMMER").replace("_", " ").title()
+                diagnostics.append({
+                    "node_type": "candlestick",
+                    "label": f"{pat} formation",
+                    "actual_value": "Waiting on candle close",
+                    "threshold": "Detected",
+                    "passed": False,
+                })
+            elif rtype == "indicator_cross":
+                diagnostics.append({
+                    "node_type": "indicator_cross",
+                    "label": f"{r.get('left', {}).get('indicator', 'Price')} {r.get('comp')} {r.get('right', {}).get('indicator', 'MA')}",
+                    "actual_value": "Watching",
+                    "threshold": "Crossover",
+                    "passed": False,
+                })
+            elif rtype == "price":
+                diagnostics.append({
+                    "node_type": "price",
+                    "label": f"Price {r.get('comp')} {r.get('value')}",
+                    "actual_value": "Watching",
+                    "threshold": r.get("value"),
+                    "comp": r.get("comp"),
+                    "passed": False,
+                })
+        return diagnostics
 
 
 def evaluate_scanner_strategy(strategy_id: int, user_id: str, mode: str = "sandbox", run_id: int | None = None) -> dict[str, Any]:

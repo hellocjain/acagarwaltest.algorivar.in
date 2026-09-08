@@ -57,6 +57,7 @@ export const strategyQueryKeys = {
   events: (id: number) => [...strategyQueryKeys.strategy(id), 'events'] as const,
   webhookEvents: (id: number) => [...strategyQueryKeys.strategy(id), 'webhook-events'] as const,
   checkpoints: (id: number) => [...strategyQueryKeys.strategy(id), 'checkpoints'] as const,
+  diagnostics: (id: number) => [...strategyQueryKeys.strategy(id), 'diagnostics'] as const,
   // The broker's own books, narrowed to this strategy. Keyed separately from
   // the local order rows because they answer a different question: what the
   // broker says happened, rather than what the engine asked for.
@@ -226,6 +227,20 @@ export async function killSwitch(id: number): Promise<KillSwitchOutcome> {
 
 export async function unlockWebhook(id: number): Promise<void> {
   await webClient.post(`${BASE}/strategies/${id}/unlock_webhook`)
+}
+
+export interface ConditionDiagnostic {
+  node_type: string
+  label: string
+  actual_value?: any
+  threshold?: any
+  comp?: string
+  passed?: boolean
+}
+
+export async function getStrategyDiagnostics(id: number): Promise<ConditionDiagnostic[]> {
+  const response = await webClient.get<{ data: ConditionDiagnostic[] }>(`${BASE}/strategies/${id}/diagnostics`)
+  return response.data.data
 }
 
 export async function listRuns(id: number): Promise<Run[]> {

@@ -27,8 +27,10 @@ import { Link, useNavigate, useParams } from 'react-router'
 import {
   buildRoundTrips,
   closeAll,
+  type ConditionDiagnostic,
   deleteStrategy,
   getStrategy,
+  getStrategyDiagnostics,
   listEvents,
   listOrders,
   startRun,
@@ -71,6 +73,8 @@ interface AgentMetadata {
   capital_per_trade_inr?: number
   max_concurrent_positions?: number
   max_lots?: number
+  condition_tree?: any
+  indicator_rules?: Record<string, any>
   plain_language?: {
     when?: string
     entry_gates?: string[]
@@ -149,12 +153,92 @@ export default function AgentDetails() {
 
   const roundTrips = useMemo(() => buildRoundTrips(orders), [orders])
 
+  // Fetch live condition diagnostics
+  const { data: conditionDiagnostics = [] } = useQuery({
+    queryKey: strategyQueryKeys.diagnostics(strategyId),
+    queryFn: () => getStrategyDiagnostics(strategyId),
+    enabled: Number.isFinite(strategyId) && strategyId > 0,
+    refetchInterval: isRunning ? 5_000 : false,
+  })
+
   // Extract plain-language metadata
   const meta: AgentMetadata | null = useMemo(() => {
     if (!strategy?.scheduler) return null
     const s = strategy.scheduler as unknown as Record<string, unknown>
     return (s.agent_metadata as AgentMetadata) ?? null
   }, [strategy])
+
+  // Extract condition tree items for Live Condition Monitor
+  const conditionItems = useMemo(() => {
+    if (conditionDiagnostics.length > 0) {
+      return conditionDiagnostics
+    }
+    // Fallback: extract from meta.condition_tree if present
+    if (meta?.condition_tree) {
+      const leaves: ConditionDiagnostic[] = []
+      const walk = (node: any) => {
+        if (!node) return
+        if (node.rules && Array.isArray(node.rules)) {
+          for (const r of node.rules) {
+            walk(r)
+          }
+        } else {
+          const rtype = node.type || 'indicator'
+          if (rtype === 'indicator') {
+            const ind = (node.indicator || 'RSI').toUpperCase()
+            const p = node.params ? Object.values(node.params)[0] : ''
+            leaves.push({
+              node_type: 'indicator',
+              label: `${ind}${p ? `(${p})` : ''} ${node.comp || '<'} ${node.value}`,
+              actual_value: 'Watching',
+              threshold: node.value,
+              comp: node.comp,
+              passed: false,
+            })
+          } else if (rtype === 'candlestick') {
+            const pat = (node.pattern || 'HAMMER').replace('_', ' ')
+            leaves.push({
+              node_type: 'candlestick',
+              label: `${pat} pattern detection`,
+              actual_value: 'Waiting on candle close',
+              threshold: 'Detected',
+              passed: false,
+            })
+          } else if (rtype === 'indicator_cross') {
+            leaves.push({
+              node_type: 'indicator_cross',
+              label: `${node.left?.indicator || 'Price'} ${node.comp} ${node.right?.indicator || 'MA'}`,
+              actual_value: 'Watching',
+              threshold: 'Crossover',
+              passed: false,
+            })
+          } else if (rtype === 'price') {
+            leaves.push({
+              node_type: 'price',
+              label: `Price ${node.comp || '>'} ${node.value}`,
+              actual_value: 'Watching',
+              threshold: node.value,
+              comp: node.comp,
+              passed: false,
+            })
+          }
+        }
+      }
+      walk(meta.condition_tree)
+      if (leaves.length > 0) return leaves
+    }
+    // Fallback: convert entry_gates to items
+    if (meta?.plain_language?.entry_gates && meta.plain_language.entry_gates.length > 0) {
+      return meta.plain_language.entry_gates.map((gate) => ({
+        node_type: 'rule',
+        label: gate,
+        actual_value: 'Watching',
+        threshold: 'Pass',
+        passed: false,
+      }))
+    }
+    return []
+  }, [conditionDiagnostics, meta])
 
   // Calculate stats
   const stats = useMemo(() => {
@@ -673,6 +757,97 @@ export default function AgentDetails() {
                     </ul>
                   </div>
                 </div>
+              </div>
+
+              {/* Live Condition Status Monitor (Phase 1 Engine) */}
+              <div className="rounded-xl border bg-card p-5 shadow-sm space-y-4">
+                <div className="flex items-center justify-between border-b pb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                      <Zap className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <h2 className="text-base font-semibold">Live Condition Status Monitor</h2>
+                      <p className="text-xs text-muted-foreground">
+                        Real-time evaluation of AST indicator, candlestick, and crossover conditions on {meta?.timeframe || 'candle'} closes.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {meta?.condition_tree?.op && (
+                      <Badge variant="outline" className="text-[10px] font-mono uppercase bg-primary/5 text-primary border-primary/20">
+                        Tree Logic: {meta.condition_tree.op}
+                      </Badge>
+                    )}
+                    <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                      <Clock className="h-3.5 w-3.5" />
+                      {isRunning ? 'Continuous Evaluation' : 'Ready to Run'}
+                    </span>
+                  </div>
+                </div>
+
+                {conditionItems.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="border-b text-muted-foreground">
+                          <th className="pb-2 font-medium">Condition Leaf</th>
+                          <th className="pb-2 font-medium">Type</th>
+                          <th className="pb-2 font-medium">Target / Threshold</th>
+                          <th className="pb-2 font-medium">Current Status / Reading</th>
+                          <th className="pb-2 font-medium text-right">Pass / Fail</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/50 font-medium">
+                        {conditionItems.map((item, idx) => {
+                          const isPassed = Boolean(item.passed)
+                          return (
+                            <tr key={idx} className="hover:bg-muted/30 transition-colors">
+                              <td className="py-2.5 font-mono text-xs text-foreground">
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className={cn(
+                                      'h-2 w-2 rounded-full shrink-0',
+                                      isPassed ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500/70'
+                                    )}
+                                  />
+                                  <span>{item.label}</span>
+                                </div>
+                              </td>
+                              <td className="py-2.5">
+                                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono uppercase text-muted-foreground">
+                                  {item.node_type}
+                                </span>
+                              </td>
+                              <td className="py-2.5 font-mono text-xs text-muted-foreground">
+                                {item.threshold !== undefined ? String(item.threshold) : '—'}
+                              </td>
+                              <td className="py-2.5 font-mono text-xs text-foreground">
+                                {item.actual_value !== undefined ? String(item.actual_value) : 'Watching'}
+                              </td>
+                              <td className="py-2.5 text-right">
+                                <span
+                                  className={cn(
+                                    'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium',
+                                    isPassed
+                                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                                      : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                                  )}
+                                >
+                                  {isPassed ? '● Passed' : '⏳ ' + String(item.actual_value || 'Watching')}
+                                </span>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-dashed p-4 text-center text-xs text-muted-foreground">
+                    No active indicator condition tree rules detected for this agent.
+                  </div>
+                )}
               </div>
 
               {/* 4-Tier Automated Safety Guard Table (Faithfully matching Insidur Screenshot 2) */}

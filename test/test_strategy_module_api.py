@@ -960,6 +960,22 @@ class TestHistory:
         assert "999" not in response.get_data(as_text=True)
 
 
+class TestDiagnostics:
+    def test_it_returns_diagnostics_for_strategy(self, client):
+        sid = create(client, name="Diagnostics Test")["data"]["id"]
+        response = client.get(f"/strategy/api/strategies/{sid}/diagnostics")
+        assert response.status_code == 200
+        body = response.get_json()
+        assert "data" in body
+        assert body["strategy_id"] == sid
+        assert isinstance(body["data"], list)
+
+    def test_other_user_strategy_diagnostics_is_refused(self, client):
+        theirs = create_for(OTHER, name="Theirs")
+        response = client.get(f"/strategy/api/strategies/{theirs['id']}/diagnostics")
+        assert response.status_code == 404
+
+
 # ---------------------------------------------------------------- validator unit
 
 

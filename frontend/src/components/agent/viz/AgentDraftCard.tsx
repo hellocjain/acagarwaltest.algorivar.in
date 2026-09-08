@@ -27,6 +27,7 @@ export interface AgentDraftCardProps {
     max_lots?: number
     account?: string
     summary?: string
+    condition_tree?: any
     plain_language?: {
       when?: string
       entry_gates?: string[]
@@ -188,31 +189,61 @@ export function AgentDraftCard({ spec, className }: AgentDraftCardProps) {
       )}
 
       {/* Collapsible Parameters Table */}
-      {detailsExpanded && spec.plain_language && (
+      {detailsExpanded && (spec.plain_language || spec.condition_tree) && (
         <div className="mt-3 space-y-2 rounded-lg border border-border/80 bg-muted/30 p-3 text-xs">
-          <div className="flex items-start gap-2">
-            <ShieldCheck className="mt-0.5 h-3.5 w-3.5 text-primary shrink-0" />
-            <div className="space-y-1">
-              <span className="font-semibold text-foreground">WHEN: </span>
-              <span className="text-muted-foreground">{spec.plain_language.when}</span>
+          {spec.plain_language?.when && (
+            <div className="flex items-start gap-2">
+              <ShieldCheck className="mt-0.5 h-3.5 w-3.5 text-primary shrink-0" />
+              <div className="space-y-1">
+                <span className="font-semibold text-foreground">WHEN: </span>
+                <span className="text-muted-foreground">{spec.plain_language.when}</span>
+              </div>
             </div>
-          </div>
+          )}
 
-          {spec.plain_language.entry_gates && spec.plain_language.entry_gates.length > 0 && (
+          {spec.plain_language?.entry_gates && spec.plain_language.entry_gates.length > 0 && (
             <div className="pl-5 text-muted-foreground">
               <span className="font-semibold text-foreground">ENTRY GATES: </span>
               {spec.plain_language.entry_gates.join(' · ')}
             </div>
           )}
 
-          {spec.plain_language.it_scans && (
+          {spec.condition_tree && (
+            <div className="pl-5 pt-1 space-y-1">
+              <span className="font-semibold text-foreground">CONDITION LOGIC (AST): </span>
+              <div className="flex flex-wrap gap-1.5 pt-0.5">
+                <span className="inline-flex items-center rounded-md bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+                  OP: {spec.condition_tree.op || 'AND'}
+                </span>
+                {Array.isArray(spec.condition_tree.rules) &&
+                  spec.condition_tree.rules.map((rule: any, idx: number) => (
+                    <span
+                      key={idx}
+                      className="inline-flex items-center rounded-md border border-border bg-background/80 px-2 py-0.5 text-[10px] font-mono text-foreground"
+                    >
+                      {rule.type === 'indicator'
+                        ? `${rule.indicator} ${rule.comp || '<'} ${rule.value}`
+                        : rule.type === 'candlestick'
+                        ? `${rule.pattern?.replace('_', ' ')}`
+                        : rule.type === 'indicator_cross'
+                        ? `${rule.left?.indicator || 'Price'} ${rule.comp} ${rule.right?.indicator || 'MA'}`
+                        : rule.op
+                        ? `Subtree (${rule.op})`
+                        : JSON.stringify(rule)}
+                    </span>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          {spec.plain_language?.it_scans && (
             <div className="pl-5 text-muted-foreground">
               <span className="font-semibold text-foreground">IT SCANS: </span>
               {spec.plain_language.it_scans}
             </div>
           )}
 
-          {spec.plain_language.how_it_exits && spec.plain_language.how_it_exits.length > 0 && (
+          {spec.plain_language?.how_it_exits && spec.plain_language.how_it_exits.length > 0 && (
             <div className="pl-5 text-muted-foreground">
               <span className="font-semibold text-foreground">HOW IT EXITS: </span>
               {spec.plain_language.how_it_exits.join(' · ')}

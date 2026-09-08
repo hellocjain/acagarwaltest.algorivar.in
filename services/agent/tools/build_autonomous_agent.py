@@ -16,6 +16,10 @@ from database.auth_db import get_username_by_apikey
 from services.agent.prompts import wrap_tool_result
 from services.agent.tools.base import OpenAlgoToolkit
 from services.agent.viz_sink import emit, no_sink_message, sink_of
+from services.strategy_module.condition_tree import (
+    condition_tree_to_plain_language,
+    legacy_rules_to_condition_tree,
+)
 from services.strategy_module.universe import resolve_universe_symbols
 from utils.logging import get_logger
 
@@ -60,6 +64,7 @@ class AutonomousAgentToolkit(OpenAlgoToolkit):
         max_concurrent_positions: int = 5,
         product_type: str = "CNC",
         entry_description: str = "",
+        condition_tree: dict | None = None,
         # Derivatives F&O scanner parameters:
         instrument_preference: str = "cash",  # "cash" | "options" | "futures"
         option_type: str = "CE",  # "CE" | "PE"
@@ -135,8 +140,16 @@ class AutonomousAgentToolkit(OpenAlgoToolkit):
             num_stocks = len(symbols)
             safe_max_pos = max(1, min(int(max_concurrent_positions), 10))
 
-            # Format indicator rule description
-            if isinstance(indicator_rules, dict):
+            # Standardize condition tree AST
+            if condition_tree and isinstance(condition_tree, dict):
+                tree_ast = condition_tree
+            else:
+                tree_ast = legacy_rules_to_condition_tree(indicator_rules or {"rsi": {"period": 14, "op": "<", "val": 25}, "supertrend": {"direction": "bullish"}})
+
+            plain_rules = condition_tree_to_plain_language(tree_ast)
+            if plain_rules:
+                rules_str = " AND ".join(plain_rules)
+            elif isinstance(indicator_rules, dict):
                 formatted_rules = []
                 for k, v in indicator_rules.items():
                     k_lower = str(k).lower()
@@ -285,6 +298,7 @@ class AutonomousAgentToolkit(OpenAlgoToolkit):
                         "universe": clean_universe,
                         "timeframe": timeframe,
                         "num_stocks": num_stocks,
+                        "condition_tree": tree_ast,
                         "indicator_rules": indicator_rules or {"rsi": "<25", "supertrend": "bullish"},
                         "exit_rules": exit_rules or {"target_pct": 10.0, "stop_loss_pct": 5.0, "rsi_exit": 75.0},
                         "capital_per_trade_inr": safe_premium_budget if inst_pref == "options" else safe_capital_per_trade,
@@ -404,6 +418,7 @@ class AutonomousAgentToolkit(OpenAlgoToolkit):
                 draft_spec["premium_sl_pct"] = premium_sl_pct
             else:
                 draft_spec["capital_per_trade_inr"] = safe_capital_per_trade
+            draft_spec["condition_tree"] = tree_ast
 
         emitted = emit(
             sink,
