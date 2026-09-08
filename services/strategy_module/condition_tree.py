@@ -420,24 +420,47 @@ def evaluate_condition_tree(tree: dict[str, Any], df: pd.DataFrame, candle_idx: 
     return ConditionEvaluationResult(passed=passed, diagnostics=diagnostics, summary=summary)
 
 
-def legacy_rules_to_condition_tree(rules: dict[str, Any] | list[Any]) -> dict[str, Any]:
+def legacy_rules_to_condition_tree(rules: dict[str, Any] | list[Any] | str) -> dict[str, Any]:
     """Convert simple flat indicator dictionary into a standardized condition tree AST."""
     if not rules:
         return {"op": "AND", "rules": []}
 
+    if isinstance(rules, str):
+        import json
+        try:
+            rules = json.loads(rules)
+        except Exception:
+            return {"op": "AND", "rules": []}
+
     ast_rules = []
 
     if isinstance(rules, dict):
-        for k, v in rules.items():
+        # Flatten nested long/entry wrappers if present
+        target_dict = rules.get("long") or rules.get("entry") or rules
+        if not isinstance(target_dict, dict):
+            target_dict = rules
+
+        for k, v in target_dict.items():
             k_lower = str(k).lower().strip()
             if k_lower == "rsi":
                 if isinstance(v, dict):
+                    cond = str(v.get("condition") or "").strip()
+                    op = v.get("op")
+                    val = v.get("val")
+                    if not op and cond.startswith(("<", ">", "<=", ">=")):
+                        op = "<=" if cond.startswith("<=") else (">=" if cond.startswith(">=") else cond[0])
+                        try:
+                            val = float(cond.lstrip("<>="))
+                        except Exception:
+                            val = 25.0
+                    op = op or "<"
+                    val = float(val if val is not None else 25.0)
                     ast_rules.append({
                         "type": "indicator",
                         "indicator": "RSI",
                         "params": {"period": v.get("period", 14)},
-                        "comp": v.get("op", "<"),
-                        "value": float(v.get("val", 25.0)),
+                        "comp": op,
+                        "value": val,
                     })
                 elif isinstance(v, (int, float)):
                     ast_rules.append({"type": "indicator", "indicator": "RSI", "params": {"period": 14}, "comp": "<", "value": float(v)})
@@ -447,11 +470,19 @@ def legacy_rules_to_condition_tree(rules: dict[str, Any] | list[Any]) -> dict[st
                     ast_rules.append({"type": "indicator", "indicator": "RSI", "params": {"period": 14}, "comp": op, "value": val})
 
             elif k_lower == "supertrend":
-                direction = v.get("direction", "bullish") if isinstance(v, dict) else str(v)
+                direction = "bullish"
+                period = 10
+                mult = 3.0
+                if isinstance(v, dict):
+                    direction = str(v.get("direction") or v.get("condition") or "bullish").lower()
+                    period = int(v.get("period") or 10)
+                    mult = float(v.get("multiplier") or 3.0)
+                else:
+                    direction = str(v).lower()
                 ast_rules.append({
                     "type": "indicator",
                     "indicator": "Supertrend",
-                    "params": {"period": 10, "multiplier": 3.0},
+                    "params": {"period": period, "multiplier": mult},
                     "field": "direction",
                     "comp": "==",
                     "value": direction,

@@ -8,6 +8,7 @@ rollover protection, and dual-gate exit evaluation.
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from typing import Any
@@ -29,6 +30,25 @@ logger = logging.getLogger(__name__)
 __all__ = ["ScannerRunner", "evaluate_scanner_strategy"]
 
 
+def _get_exit_pct(rules: Any, keys: list[str], default: float) -> float:
+    """Safely extract percentage exit parameter from dictionary or parsed JSON."""
+    if isinstance(rules, str):
+        try:
+            rules = json.loads(rules)
+        except Exception:
+            rules = {}
+    if not isinstance(rules, dict):
+        return default
+    for k in keys:
+        val = rules.get(k)
+        if val is not None:
+            try:
+                return float(val)
+            except (ValueError, TypeError):
+                continue
+    return default
+
+
 class ScannerRunner:
     """Manages the scanning, indicator calculation, and position lifecycle for an agent."""
 
@@ -45,10 +65,34 @@ class ScannerRunner:
             raise ValueError(f"Strategy {self.strategy_id} not found for user {self.user_id}")
         self.strategy_dict = sm_store.strategy_to_dict(strategy_row)
         scheduler = self.strategy_dict.get("scheduler") or {}
-        self.metadata = scheduler.get("agent_metadata") or {}
+        if isinstance(scheduler, str):
+            try:
+                scheduler = json.loads(scheduler)
+            except Exception:
+                scheduler = {}
+
+        raw_meta = scheduler.get("agent_metadata") or {}
+        if isinstance(raw_meta, str):
+            try:
+                self.metadata = json.loads(raw_meta)
+            except Exception:
+                self.metadata = {}
+        elif isinstance(raw_meta, dict):
+            self.metadata = raw_meta
+        else:
+            self.metadata = {}
+
         self.universe_name = self.metadata.get("universe", "NIFTY500")
         self.symbols = resolve_universe_symbols(self.universe_name)
-        self.instrument_preference = (self.metadata.get("instrument_preference") or "cash").lower()
+
+        inst_pref = str(self.metadata.get("instrument_preference") or "cash").lower()
+        if "option" in inst_pref:
+            self.instrument_preference = "options"
+        elif "future" in inst_pref:
+            self.instrument_preference = "futures"
+        else:
+            self.instrument_preference = "cash"
+
         self.option_type = (self.metadata.get("option_type") or "CE").upper()
         self.strike_mode = (self.metadata.get("strike_mode") or "atm").lower()
         self.max_premium_per_trade = float(self.metadata.get("max_premium_per_trade_inr") or 15000.0)
@@ -58,8 +102,32 @@ class ScannerRunner:
         self.max_concurrent_positions = int(self.metadata.get("max_concurrent_positions") or (3 if self.instrument_preference == "options" else 5))
         self.timeframe = self.metadata.get("timeframe", "5m")
         self.product_type = self.metadata.get("product_type", "CNC")
-        self.condition_tree = self.metadata.get("condition_tree") or legacy_rules_to_condition_tree(self.metadata.get("indicator_rules") or {})
-        self.exit_rules = self.metadata.get("exit_rules") or {"target_pct": 10.0, "stop_loss_pct": 5.0, "rsi_exit": 75.0}
+
+        cond_tree = self.metadata.get("condition_tree")
+        if isinstance(cond_tree, str):
+            try:
+                cond_tree = json.loads(cond_tree)
+            except Exception:
+                cond_tree = None
+
+        ind_rules = self.metadata.get("indicator_rules")
+        if isinstance(ind_rules, str):
+            try:
+                ind_rules = json.loads(ind_rules)
+            except Exception:
+                ind_rules = {}
+
+        self.condition_tree = cond_tree or legacy_rules_to_condition_tree(ind_rules or {})
+
+        exit_r = self.metadata.get("exit_rules")
+        if isinstance(exit_r, str):
+            try:
+                exit_r = json.loads(exit_r)
+            except Exception:
+                exit_r = {}
+        if not isinstance(exit_r, dict):
+            exit_r = {}
+        self.exit_rules = exit_r or {"target_pct": 10.0, "stop_loss_pct": 5.0, "rsi_exit": 75.0}
 
     def log_decision(self, kind: str, message: str, severity: str = "info", payload: dict | None = None) -> None:
         """Record an entry in the Live Decision Journal (sm_strategy_event)."""
@@ -163,8 +231,8 @@ class ScannerRunner:
                     gate_a_tgt = round(opt_res.estimated_premium * (1.0 + self.premium_target_pct / 100.0), 2)
                     gate_a_sl = round(opt_res.estimated_premium * (1.0 - self.premium_sl_pct / 100.0), 2)
 
-                    stock_tgt_pct = float(self.exit_rules.get("target_pct", 10.0))
-                    stock_sl_pct = float(self.exit_rules.get("stop_loss_pct", 5.0))
+                    stock_tgt_pct = _get_exit_pct(self.exit_rules, ["target_pct", "target_profit_pct", "target", "take_profit_pct"], 10.0)
+                    stock_sl_pct = _get_exit_pct(self.exit_rules, ["stop_loss_pct", "stop_loss", "stoploss", "sl_pct"], 5.0)
                     gate_b_tgt = round(ltp * (1.0 + stock_tgt_pct / 100.0), 2)
                     gate_b_sl = round(ltp * (1.0 - stock_sl_pct / 100.0), 2)
 
@@ -190,7 +258,7 @@ class ScannerRunner:
                         "gate_a_sl": gate_a_sl,
                         "gate_b_target": gate_b_tgt,
                         "gate_b_sl": gate_b_sl,
-                        "rsi_exit": self.exit_rules.get("rsi_exit", 75.0),
+                        "rsi_exit": _get_exit_pct(self.exit_rules, ["rsi_exit", "rsi"], 75.0),
                     }
                     self.log_decision(kind="order_filled", message=order_msg, severity="success", payload=payload)
                     results["orders_placed"].append(payload)
@@ -198,8 +266,8 @@ class ScannerRunner:
                 # Handle Stock Futures Scanner Mode
                 elif self.instrument_preference == "futures":
                     fut_res = resolve_stock_future(symbol=sym, ltp=ltp, lots=1)
-                    stock_tgt_pct = float(self.exit_rules.get("target_pct", 10.0))
-                    stock_sl_pct = float(self.exit_rules.get("stop_loss_pct", 5.0))
+                    stock_tgt_pct = _get_exit_pct(self.exit_rules, ["target_pct", "target_profit_pct", "target", "take_profit_pct"], 10.0)
+                    stock_sl_pct = _get_exit_pct(self.exit_rules, ["stop_loss_pct", "stop_loss", "stoploss", "sl_pct"], 5.0)
                     fut_tgt = round(ltp * (1.0 + stock_tgt_pct / 100.0), 2)
                     fut_sl = round(ltp * (1.0 - stock_sl_pct / 100.0), 2)
 
@@ -226,8 +294,8 @@ class ScannerRunner:
                 else:
                     qty = max(1, int(self.capital_per_trade / ltp))
                     invested = qty * ltp
-                    stock_tgt_pct = float(self.exit_rules.get("target_pct", 10.0))
-                    stock_sl_pct = float(self.exit_rules.get("stop_loss_pct", 5.0))
+                    stock_tgt_pct = _get_exit_pct(self.exit_rules, ["target_pct", "target_profit_pct", "target", "take_profit_pct"], 10.0)
+                    stock_sl_pct = _get_exit_pct(self.exit_rules, ["stop_loss_pct", "stop_loss", "stoploss", "sl_pct"], 5.0)
                     tgt_price = round(ltp * (1.0 + stock_tgt_pct / 100.0), 2)
                     sl_price = round(ltp * (1.0 - stock_sl_pct / 100.0), 2)
 

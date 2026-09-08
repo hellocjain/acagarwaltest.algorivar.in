@@ -175,3 +175,55 @@ def test_scanner_agent_tool_and_lifecycle():
     assert stop_res.get("ok") is True or stop_res.get("stop_pending") is False
     final_strat = sm_store.get_strategy(strategy_id, USER)
     assert final_strat.status == "stopped"
+
+
+def test_scanner_agent_stringified_metadata_and_resume():
+    """Verify that stringified JSON in scheduler/agent_metadata/exit_rules does not break resume/start."""
+    import json
+
+    strategy_config = {
+        "name": "Stringified Agent Test",
+        "strategy_kind": "scanner",
+        "direction": "both",
+        "universe_tab": "weekly_monthly",
+        "underlying": "NIFTY",
+        "underlying_exchange": "NSE",
+        "strategy_type": "scanner",
+        "product": "CNC",
+        "pricetype": "MARKET",
+        "legs": [],
+        "scheduler": {
+            "agent_metadata": json.dumps({
+                "category": "scanner",
+                "universe": "NIFTY50",
+                "instrument_preference": "MCX Futures, nearest month",
+                "indicator_rules": json.dumps({
+                    "long": {
+                        "rsi": {"condition": "< 25", "period": 14},
+                        "supertrend": {"condition": "bullish", "period": 10, "multiplier": 3.0},
+                    }
+                }),
+                "exit_rules": json.dumps({
+                    "target_profit_pct": 12.5,
+                    "stop_loss": 6.0,
+                    "target": None,
+                }),
+            })
+        },
+    }
+
+    payload, err = sm_store.create_strategy(USER, strategy_config)
+    assert err is None
+    strat_id = payload["id"]
+
+    with (
+        patch.object(engine, "_api_key_for", return_value="test-api-key"),
+        patch.object(engine, "_broker_for", return_value="sandbox"),
+    ):
+        start_res = engine.start_run(strat_id, USER, mode="sandbox")
+
+    assert start_res.ok is True, f"Failed with: {start_res.error}"
+    assert start_res.run_id is not None
+    strat = sm_store.get_strategy(strat_id, USER)
+    assert strat.status == "running"
+
