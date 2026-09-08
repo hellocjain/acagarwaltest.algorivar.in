@@ -498,11 +498,18 @@ def condition_tree_to_plain_language(tree: dict[str, Any]) -> list[str]:
     for r in leaves:
         rtype = r.get("type", "indicator")
         if rtype == "indicator":
-            ind = r.get("indicator", "RSI").upper()
+            raw_ind = r.get("indicator", "RSI")
+            ind_upper = raw_ind.upper()
             p = r.get("params", {})
-            param_str = f"({list(p.values())[0]})" if p else ""
-            field_str = f".{r.get('field')}" if r.get("field") else ""
-            lines.append(f"{ind}{field_str}{param_str} {r.get('comp', '<')} {r.get('value')}")
+            if ind_upper == "SUPERTREND":
+                d = str(r.get("value", "bullish")).capitalize()
+                period = p.get("period", 10)
+                lines.append(f"Supertrend({period}) is {d}")
+            else:
+                ind = ind_upper if ind_upper in ("RSI", "EMA", "SMA", "ATR", "MACD", "VWAP", "ADX", "CCI", "MFI", "OBV") else raw_ind.title()
+                param_str = f"({list(p.values())[0]})" if p else ""
+                field_str = f".{r.get('field')}" if r.get("field") else ""
+                lines.append(f"{ind}{field_str}{param_str} {r.get('comp', '<')} {r.get('value')}")
         elif rtype == "indicator_cross":
             lines.append(f"{r.get('left', {}).get('indicator', 'Price')} {r.get('comp', 'crosses')} {r.get('right', {}).get('indicator', 'MA')}")
         elif rtype == "candlestick":
