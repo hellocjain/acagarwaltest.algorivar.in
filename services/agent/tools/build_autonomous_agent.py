@@ -60,6 +60,13 @@ class AutonomousAgentToolkit(OpenAlgoToolkit):
         max_concurrent_positions: int = 5,
         product_type: str = "CNC",
         entry_description: str = "",
+        # Derivatives F&O scanner parameters:
+        instrument_preference: str = "cash",  # "cash" | "options" | "futures"
+        option_type: str = "CE",  # "CE" | "PE"
+        strike_mode: str = "atm",  # "atm" | "otm1" | "itm1"
+        max_premium_per_trade_inr: float = 15000.0,
+        premium_target_pct: float = 40.0,
+        premium_sl_pct: float = 25.0,
     ) -> str:
         """Build and register an autonomous trading agent strategy in OpenAlgo.
 
@@ -109,14 +116,24 @@ class AutonomousAgentToolkit(OpenAlgoToolkit):
 
         if category == "scanner":
             # -------------------------------------------------------------
-            # UNIVERSAL MULTI-STOCK SCANNER MODE (NIFTY 500 / RSI / SUPERTREND)
+            # UNIVERSAL MULTI-STOCK / F&O DERIVATIVE SCANNER MODE
             # -------------------------------------------------------------
-            clean_universe = (universe or "NIFTY500").strip().upper()
+            inst_pref = instrument_preference.lower().strip()
+            if inst_pref == "cash":
+                import re
+                name_words = set(re.findall(r"\b[a-zA-Z]+\b", name.lower()))
+                if name_words.intersection({"option", "options", "call", "calls", "put", "puts", "ce", "pe"}):
+                    inst_pref = "options"
+                elif name_words.intersection({"future", "futures", "fut"}):
+                    inst_pref = "futures"
+
+            clean_universe = (universe or ("FNO_STOCKS" if inst_pref in ("options", "futures") else "NIFTY500")).strip().upper()
+            if clean_universe in ("FNO", "STOCKS_FNO"):
+                clean_universe = "FNO_STOCKS"
+
             symbols = resolve_universe_symbols(clean_universe)
             num_stocks = len(symbols)
             safe_max_pos = max(1, min(int(max_concurrent_positions), 10))
-            safe_capital_per_trade = max(1000.0, float(capital_per_trade_inr))
-            total_budget = safe_capital_per_trade * safe_max_pos
 
             # Format indicator rule description
             if isinstance(indicator_rules, dict):
@@ -161,16 +178,82 @@ class AutonomousAgentToolkit(OpenAlgoToolkit):
                     "Mandatory exit when RSI > 75 or Supertrend turns Bearish",
                 ]
 
-            plain_language = {
-                "when": f"Every {timeframe} candle close · 09:15 - 15:30 IST",
-                "entry_gates": [
-                    rules_str,
-                    f"Active trading days: {', '.join(days)}",
-                    f"Max concurrent positions: {safe_max_pos} stocks",
-                ],
-                "it_scans": f"Scans all {num_stocks} stocks in {clean_universe}. Buys {product_type} with ₹{safe_capital_per_trade:,.0f} per stock (Max budget: ₹{total_budget:,.0f}).",
-                "how_it_exits": exits_list,
-            }
+            if inst_pref == "options":
+                opt_type = option_type.upper().strip()
+                if opt_type not in ("CE", "PE"):
+                    opt_type = "CE"
+                stk_mode = strike_mode.lower().strip()
+                safe_premium_budget = max(2000.0, float(max_premium_per_trade_inr))
+                total_budget = safe_premium_budget * safe_max_pos
+                effective_product = "NRML"
+
+                plain_language = {
+                    "when": f"Every {timeframe} candle close · 09:15 - 15:30 IST",
+                    "entry_gates": [
+                        rules_str,
+                        f"NSE F&O stock basket ({clean_universe}) with active monthly options chain",
+                        f"Max concurrent positions: {safe_max_pos} stock options",
+                    ],
+                    "it_scans": (
+                        f"Scans all {num_stocks} stocks in {clean_universe}. "
+                        f"Automatically buys {stk_mode.upper()} Monthly {opt_type} Option within ₹{safe_premium_budget:,.0f} "
+                        f"premium budget (Rollover Shield active)."
+                    ),
+                    "how_it_exits": [
+                        f"Dual Exit Gate A: Option Premium Target at +{premium_target_pct:.0f}% or Stop Loss at -{premium_sl_pct:.0f}%",
+                        f"Dual Exit Gate B: Underlying Stock Technical Exit ({exits_list[0] if exits_list else 'Target/SL'})",
+                        f"Mandatory {auto_exit_time} auto-exit / Expiry week Tuesday close to prevent physical delivery",
+                    ],
+                }
+
+                summary_text = (
+                    f"{clean_universe} Stock Options ({stk_mode.upper()} {opt_type}) | {rules_str} | "
+                    f"TGT: +{premium_target_pct:.0f}% | SL: -{premium_sl_pct:.0f}% | Max ₹{safe_premium_budget:,.0f}/trade"
+                )
+
+                sl_mtm = float(safe_premium_budget * (premium_sl_pct / 100.0) * safe_max_pos)
+                tgt_mtm = float(safe_premium_budget * (premium_target_pct / 100.0) * safe_max_pos)
+                daily_loss = float(sl_mtm * 1.5)
+
+            elif inst_pref == "futures":
+                safe_capital_per_trade = max(50000.0, float(capital_per_trade_inr))
+                total_budget = safe_capital_per_trade * safe_max_pos
+                effective_product = "MIS"
+
+                plain_language = {
+                    "when": f"Every {timeframe} candle close · 09:15 - 15:30 IST",
+                    "entry_gates": [
+                        rules_str,
+                        f"NSE F&O stock basket ({clean_universe}) with active monthly futures",
+                        f"Max concurrent positions: {safe_max_pos} stock futures",
+                    ],
+                    "it_scans": f"Scans all {num_stocks} stocks in {clean_universe}. Trades 1 lot Monthly Futures contract with Symphony XTS margin check.",
+                    "how_it_exits": exits_list,
+                }
+                summary_text = f"{clean_universe} Stock Futures | {rules_str} | Target: +10% | SL: -5%"
+                sl_mtm = float(safe_capital_per_trade * 0.05 * safe_max_pos)
+                tgt_mtm = float(safe_capital_per_trade * 0.10 * safe_max_pos)
+                daily_loss = float(safe_capital_per_trade * 0.10 * safe_max_pos)
+
+            else:
+                safe_capital_per_trade = max(1000.0, float(capital_per_trade_inr))
+                total_budget = safe_capital_per_trade * safe_max_pos
+                effective_product = product_type
+
+                plain_language = {
+                    "when": f"Every {timeframe} candle close · 09:15 - 15:30 IST",
+                    "entry_gates": [
+                        rules_str,
+                        f"Active trading days: {', '.join(days)}",
+                        f"Max concurrent positions: {safe_max_pos} stocks",
+                    ],
+                    "it_scans": f"Scans all {num_stocks} stocks in {clean_universe}. Buys {product_type} with ₹{safe_capital_per_trade:,.0f} per stock (Max budget: ₹{total_budget:,.0f}).",
+                    "how_it_exits": exits_list,
+                }
+                summary_text = f"{clean_universe} Scanner ({num_stocks} stocks) | {rules_str} | Target: +10% | SL: -5%"
+                sl_mtm = float(safe_capital_per_trade * 0.05 * safe_max_pos)
+                tgt_mtm = float(safe_capital_per_trade * 0.10 * safe_max_pos)
+                daily_loss = float(safe_capital_per_trade * 0.10 * safe_max_pos)
 
             strategy_config = {
                 "name": name,
@@ -180,12 +263,12 @@ class AutonomousAgentToolkit(OpenAlgoToolkit):
                 "underlying": clean_universe,
                 "underlying_exchange": "NSE",
                 "strategy_type": "scanner",
-                "product": product_type,
+                "product": effective_product,
                 "pricetype": "MARKET",
                 "legs": [],
-                "overall_sl_mtm": float(safe_capital_per_trade * 0.05 * safe_max_pos),
-                "overall_target_mtm": float(safe_capital_per_trade * 0.10 * safe_max_pos),
-                "daily_loss_limit_inr": float(safe_capital_per_trade * 0.10 * safe_max_pos),
+                "overall_sl_mtm": sl_mtm,
+                "overall_target_mtm": tgt_mtm,
+                "daily_loss_limit_inr": daily_loss,
                 "scheduler": {
                     "active_days": days,
                     "entry_time": when_time,
@@ -193,20 +276,24 @@ class AutonomousAgentToolkit(OpenAlgoToolkit):
                     "agent_metadata": {
                         "category": "scanner",
                         "strategy_category": "scanner",
+                        "instrument_preference": inst_pref,
+                        "option_type": opt_type if inst_pref == "options" else None,
+                        "strike_mode": stk_mode if inst_pref == "options" else None,
+                        "max_premium_per_trade_inr": safe_premium_budget if inst_pref == "options" else None,
+                        "premium_target_pct": premium_target_pct if inst_pref == "options" else None,
+                        "premium_sl_pct": premium_sl_pct if inst_pref == "options" else None,
                         "universe": clean_universe,
                         "timeframe": timeframe,
                         "num_stocks": num_stocks,
                         "indicator_rules": indicator_rules or {"rsi": "<25", "supertrend": "bullish"},
                         "exit_rules": exit_rules or {"target_pct": 10.0, "stop_loss_pct": 5.0, "rsi_exit": 75.0},
-                        "capital_per_trade_inr": safe_capital_per_trade,
+                        "capital_per_trade_inr": safe_premium_budget if inst_pref == "options" else safe_capital_per_trade,
                         "max_concurrent_positions": safe_max_pos,
-                        "product_type": product_type,
+                        "product_type": effective_product,
                         "plain_language": plain_language,
                     },
                 },
             }
-
-            summary_text = f"{clean_universe} Scanner ({num_stocks} stocks) | {rules_str} | Target: +10% | SL: -5%"
 
         else:
             # -------------------------------------------------------------
@@ -306,8 +393,17 @@ class AutonomousAgentToolkit(OpenAlgoToolkit):
 
         if category == "scanner":
             draft_spec["universe"] = clean_universe
-            draft_spec["capital_per_trade_inr"] = safe_capital_per_trade
+            draft_spec["instrument_preference"] = inst_pref
             draft_spec["max_concurrent_positions"] = safe_max_pos
+            if inst_pref == "options":
+                draft_spec["option_type"] = opt_type
+                draft_spec["strike_mode"] = stk_mode
+                draft_spec["max_premium_per_trade_inr"] = safe_premium_budget
+                draft_spec["capital_per_trade_inr"] = safe_premium_budget
+                draft_spec["premium_target_pct"] = premium_target_pct
+                draft_spec["premium_sl_pct"] = premium_sl_pct
+            else:
+                draft_spec["capital_per_trade_inr"] = safe_capital_per_trade
 
         emitted = emit(
             sink,

@@ -61,6 +61,12 @@ interface AgentMetadata {
   universe?: string
   timeframe?: string
   product_type?: string
+  instrument_preference?: string
+  option_type?: string
+  strike_mode?: string
+  max_premium_per_trade_inr?: number
+  premium_target_pct?: number
+  premium_sl_pct?: number
   capital_inr?: number
   capital_per_trade_inr?: number
   max_concurrent_positions?: number
@@ -358,7 +364,11 @@ export default function AgentDetails() {
                 <div className="flex flex-wrap items-center gap-2 text-xs">
                   {strategy.strategy_kind === 'scanner' || meta?.universe ? (
                     <Badge variant="secondary" className="bg-purple-500/10 text-purple-600 dark:text-purple-400 font-semibold">
-                      {meta?.universe || 'NIFTY 500'} Scanner
+                      {meta?.instrument_preference === 'options'
+                        ? `${meta?.universe || 'F&O'} Stock Options`
+                        : meta?.instrument_preference === 'futures'
+                        ? `${meta?.universe || 'F&O'} Stock Futures`
+                        : `${meta?.universe || 'NIFTY 500'} Scanner`}
                     </Badge>
                   ) : (
                     <Badge variant="secondary" className="font-semibold">
@@ -377,7 +387,29 @@ export default function AgentDetails() {
                   >
                     Auto-execute
                   </Badge>
-                  {strategy.strategy_kind === 'scanner' || meta?.universe ? (
+                  {meta?.instrument_preference === 'options' ? (
+                    <>
+                      <Badge
+                        variant="outline"
+                        className="border-emerald-500/30 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400"
+                      >
+                        {meta?.option_type || 'CE'} {meta?.strike_mode?.toUpperCase() || 'ATM'} Monthly
+                      </Badge>
+                      <Badge
+                        variant="outline"
+                        className="border-amber-500/30 bg-amber-500/5 text-amber-600 dark:text-amber-400"
+                      >
+                        Rollover Shield Active
+                      </Badge>
+                    </>
+                  ) : meta?.instrument_preference === 'futures' ? (
+                    <Badge
+                      variant="outline"
+                      className="border-emerald-500/30 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400"
+                    >
+                      Monthly Stock Futures
+                    </Badge>
+                  ) : strategy.strategy_kind === 'scanner' || meta?.universe ? (
                     <Badge
                       variant="outline"
                       className="border-emerald-500/30 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400"

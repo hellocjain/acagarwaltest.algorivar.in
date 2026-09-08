@@ -72,4 +72,27 @@ describe('AgentDraftCard', () => {
     expect(screen.getByText(/At 9:16 AM · Mon, Wed, Thu, Fri/i)).toBeInTheDocument()
     expect(screen.getByText(/Scans NIFTY weekly options, 1 lot max/i)).toBeInTheDocument()
   })
+
+  it('renders F&O Options Scanner badge and rollover shield', () => {
+    const fnoSpec = {
+      strategy_id: 102,
+      name: 'F&O Momentum Calls',
+      universe: 'FNO',
+      strategy_category: 'scanner',
+      instrument_preference: 'options',
+      option_type: 'CE',
+      strike_mode: 'atm',
+      max_premium_per_trade_inr: 15000,
+      summary: 'FNO Stock Options (ATM CE) | RSI < 25 | TGT: +40% | SL: -25% | Max ₹15,000/trade',
+    }
+
+    render(<AgentDraftCard spec={fnoSpec} />)
+
+    expect(screen.getByText('F&O Momentum Calls')).toBeInTheDocument()
+    expect(screen.getByText('FNO Options Scanner')).toBeInTheDocument()
+    expect(screen.getByText('Rollover Shield')).toBeInTheDocument()
+    expect(
+      screen.getByText('FNO Stock Options (ATM CE) | RSI < 25 | TGT: +40% | SL: -25% | Max ₹15,000/trade')
+    ).toBeInTheDocument()
+  })
 })

@@ -48,6 +48,12 @@ interface AgentMetadata {
   universe?: string
   timeframe?: string
   product_type?: string
+  instrument_preference?: string
+  option_type?: string
+  strike_mode?: string
+  max_premium_per_trade_inr?: number
+  premium_target_pct?: number
+  premium_sl_pct?: number
   capital_inr?: number
   capital_per_trade_inr?: number
   max_concurrent_positions?: number
@@ -284,9 +290,20 @@ export default function AgentCockpit() {
                           </CardTitle>
                           <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
                             {meta?.universe || strategy.strategy_kind === 'scanner' ? (
-                              <Badge variant="secondary" className="bg-purple-500/10 text-purple-600 dark:text-purple-400 px-1.5 py-0 text-[10px] font-semibold">
-                                {meta?.universe || 'NIFTY 500'} Scanner
-                              </Badge>
+                              <>
+                                <Badge variant="secondary" className="bg-purple-500/10 text-purple-600 dark:text-purple-400 px-1.5 py-0 text-[10px] font-semibold">
+                                  {meta?.instrument_preference === 'options'
+                                    ? `${meta?.universe || 'F&O'} Stock Options`
+                                    : meta?.instrument_preference === 'futures'
+                                    ? `${meta?.universe || 'F&O'} Stock Futures`
+                                    : `${meta?.universe || 'NIFTY 500'} Scanner`}
+                                </Badge>
+                                {meta?.instrument_preference === 'options' && (
+                                  <Badge variant="outline" className="border-amber-500/30 bg-amber-500/5 text-amber-600 dark:text-amber-400 px-1.5 py-0 text-[10px]">
+                                    Rollover Shield
+                                  </Badge>
+                                )}
+                              </>
                             ) : (
                               <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-semibold">
                                 {strategy.underlying}
@@ -339,7 +356,22 @@ export default function AgentCockpit() {
                         </div>
 
                         {/* Risk & Safety Limits */}
-                        {strategy.strategy_kind === 'scanner' || meta?.universe ? (
+                        {meta?.instrument_preference === 'options' ? (
+                          <div className="mt-2.5 grid grid-cols-2 gap-2 border-t pt-2 text-[11px] text-muted-foreground">
+                            <div>
+                              <span>Prem Budget: </span>
+                              <span className="font-semibold text-foreground">
+                                ₹{(meta?.max_premium_per_trade_inr ?? meta?.capital_per_trade_inr ?? 15000).toLocaleString('en-IN')}
+                              </span>
+                            </div>
+                            <div className="text-right">
+                              <span>Max Contracts: </span>
+                              <span className="font-semibold text-foreground">
+                                {meta?.max_concurrent_positions ?? 3} Concurrent
+                              </span>
+                            </div>
+                          </div>
+                        ) : strategy.strategy_kind === 'scanner' || meta?.universe ? (
                           <div className="mt-2.5 grid grid-cols-2 gap-2 border-t pt-2 text-[11px] text-muted-foreground">
                             <div>
                               <span>Alloc / Trade: </span>

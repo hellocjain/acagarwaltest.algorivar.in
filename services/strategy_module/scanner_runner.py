@@ -2,7 +2,8 @@
 
 Executes multi-stock scanning across universes (NIFTY 50, NIFTY 500, F&O)
 evaluating technical indicators (RSI, Supertrend, etc.) using openalgo.ta,
-enforcing capital limits, and logging decisions to sm_strategy_event.
+enforcing capital limits, dynamic stock derivatives strike resolution,
+rollover protection, and dual-gate exit evaluation.
 """
 
 from __future__ import annotations
@@ -12,6 +13,10 @@ from datetime import datetime
 from typing import Any
 
 from database import strategy_module_db as sm_store
+from services.strategy_module.stock_derivatives import (
+    resolve_stock_future,
+    resolve_stock_option,
+)
 from services.strategy_module.universe import resolve_universe_symbols
 
 logger = logging.getLogger(__name__)
@@ -38,10 +43,17 @@ class ScannerRunner:
         self.metadata = scheduler.get("agent_metadata") or {}
         self.universe_name = self.metadata.get("universe", "NIFTY500")
         self.symbols = resolve_universe_symbols(self.universe_name)
-        self.capital_per_trade = float(self.metadata.get("capital_per_trade_inr", 10000.0))
-        self.max_concurrent_positions = int(self.metadata.get("max_concurrent_positions", 5))
+        self.instrument_preference = (self.metadata.get("instrument_preference") or "cash").lower()
+        self.option_type = (self.metadata.get("option_type") or "CE").upper()
+        self.strike_mode = (self.metadata.get("strike_mode") or "atm").lower()
+        self.max_premium_per_trade = float(self.metadata.get("max_premium_per_trade_inr") or 15000.0)
+        self.premium_target_pct = float(self.metadata.get("premium_target_pct") or 40.0)
+        self.premium_sl_pct = float(self.metadata.get("premium_sl_pct") or 25.0)
+        self.capital_per_trade = float(self.metadata.get("capital_per_trade_inr") or 10000.0)
+        self.max_concurrent_positions = int(self.metadata.get("max_concurrent_positions") or (3 if self.instrument_preference == "options" else 5))
         self.timeframe = self.metadata.get("timeframe", "5m")
         self.product_type = self.metadata.get("product_type", "CNC")
+        self.exit_rules = self.metadata.get("exit_rules") or {"target_pct": 10.0, "stop_loss_pct": 5.0, "rsi_exit": 75.0}
 
     def log_decision(self, kind: str, message: str, severity: str = "info", payload: dict | None = None) -> None:
         """Record an entry in the Live Decision Journal (sm_strategy_event)."""
@@ -62,15 +74,16 @@ class ScannerRunner:
             mock_matches: Optional list of simulated stock matches for offline/test environments.
         """
         now_str = datetime.now().strftime("%H:%M:%S")
+        inst_label = "Stock Options" if self.instrument_preference == "options" else ("Stock Futures" if self.instrument_preference == "futures" else "Cash Stocks")
         self.log_decision(
             kind="scan_started",
-            message=f"[{now_str}] Started scanning {len(self.symbols)} stocks in {self.universe_name} ({self.timeframe} interval).",
+            message=f"[{now_str}] Started scanning {len(self.symbols)} {inst_label} in {self.universe_name} ({self.timeframe} interval).",
             severity="info",
         )
 
         # In offline or mock mode, or when live broker feeds provide candle data
         matches = mock_matches or []
-        if not matches:
+        if not matches and mock_matches is None:
             # Simulated realistic match for testing/paper scanning if no mock passed
             matches = [
                 {"symbol": "TATAMOTORS", "ltp": 982.50, "rsi": 22.8, "supertrend": "bullish"},
@@ -80,6 +93,7 @@ class ScannerRunner:
         results = {
             "scanned_count": len(self.symbols),
             "matches_count": len(matches),
+            "instrument_preference": self.instrument_preference,
             "orders_placed": [],
         }
 
@@ -96,22 +110,130 @@ class ScannerRunner:
             for m in matches[:slots_available]:
                 sym = m["symbol"]
                 ltp = float(m["ltp"])
-                qty = max(1, int(self.capital_per_trade / ltp))
-                invested = qty * ltp
-                tgt_price = round(ltp * 1.10, 2)
-                sl_price = round(ltp * 0.95, 2)
 
-                order_msg = (
-                    f"Placed BUY {self.product_type} for {qty} shares of {sym} @ ₹{ltp:,.2f} "
-                    f"(Allocated: ₹{invested:,.2f}). Target: ₹{tgt_price:,.2f} (+10%), SL: ₹{sl_price:,.2f} (-5%)."
-                )
-                self.log_decision(
-                    kind="order_filled",
-                    message=order_msg,
-                    severity="success",
-                    payload={"symbol": sym, "qty": qty, "price": ltp, "target": tgt_price, "stoploss": sl_price},
-                )
-                results["orders_placed"].append({"symbol": sym, "qty": qty, "price": ltp, "invested": invested})
+                # Handle Stock Options Scanner Mode
+                if self.instrument_preference == "options":
+                    opt_res = resolve_stock_option(
+                        symbol=sym,
+                        ltp=ltp,
+                        option_type=self.option_type,
+                        strike_mode=self.strike_mode,
+                        lots=1,
+                    )
+
+                    if not opt_res.ok:
+                        self.log_decision(
+                            kind="option_resolution_failed",
+                            message=f"Could not resolve option for {sym}: {opt_res.error}",
+                            severity="warning",
+                        )
+                        continue
+
+                    # Check capital allocation budget
+                    if opt_res.total_capital_required > self.max_premium_per_trade:
+                        self.log_decision(
+                            kind="budget_limit_exceeded",
+                            message=(
+                                f"Skipped {sym}: 1 lot of {opt_res.symbol} requires ₹{opt_res.total_capital_required:,.2f} "
+                                f"premium, which exceeds allocated budget ₹{self.max_premium_per_trade:,.2f}."
+                            ),
+                            severity="warning",
+                            payload={"symbol": sym, "required": opt_res.total_capital_required, "budget": self.max_premium_per_trade},
+                        )
+                        continue
+
+                    # Log Rollover Shield notice if applicable
+                    if opt_res.rolled_over:
+                        self.log_decision(
+                            kind="rollover_shield_activated",
+                            message=(
+                                f"Rollover Shield Activated for {sym}: Expiry is within 4 days. "
+                                f"Selected next-month contract {opt_res.symbol} ({opt_res.expiry}) to avoid physical settlement risk."
+                            ),
+                            severity="info",
+                        )
+
+                    # Compute Dual Exit Gates
+                    gate_a_tgt = round(opt_res.estimated_premium * (1.0 + self.premium_target_pct / 100.0), 2)
+                    gate_a_sl = round(opt_res.estimated_premium * (1.0 - self.premium_sl_pct / 100.0), 2)
+
+                    stock_tgt_pct = float(self.exit_rules.get("target_pct", 10.0))
+                    stock_sl_pct = float(self.exit_rules.get("stop_loss_pct", 5.0))
+                    gate_b_tgt = round(ltp * (1.0 + stock_tgt_pct / 100.0), 2)
+                    gate_b_sl = round(ltp * (1.0 - stock_sl_pct / 100.0), 2)
+
+                    order_msg = (
+                        f"Placed BUY NRML for {opt_res.quantity} shares ({opt_res.lots} lot) of {opt_res.symbol} "
+                        f"@ est. ₹{opt_res.estimated_premium:,.2f} (Total Premium: ₹{opt_res.total_capital_required:,.2f}). "
+                        f"Gate A: Option TGT ₹{gate_a_tgt:,.2f} (+{self.premium_target_pct:.0f}%) / "
+                        f"SL ₹{gate_a_sl:,.2f} (-{self.premium_sl_pct:.0f}%). "
+                        f"Gate B: Underlying {sym} TGT ₹{gate_b_tgt:,.2f} (+{stock_tgt_pct:.0f}%) / SL ₹{gate_b_sl:,.2f} (-{stock_sl_pct:.0f}%)."
+                    )
+                    payload = {
+                        "instrument": "options",
+                        "contract_symbol": opt_res.symbol,
+                        "underlying": sym,
+                        "strike": opt_res.strike,
+                        "option_type": opt_res.option_type,
+                        "expiry": opt_res.expiry,
+                        "rolled_over": opt_res.rolled_over,
+                        "quantity": opt_res.quantity,
+                        "price": opt_res.estimated_premium,
+                        "invested": opt_res.total_capital_required,
+                        "gate_a_target": gate_a_tgt,
+                        "gate_a_sl": gate_a_sl,
+                        "gate_b_target": gate_b_tgt,
+                        "gate_b_sl": gate_b_sl,
+                        "rsi_exit": self.exit_rules.get("rsi_exit", 75.0),
+                    }
+                    self.log_decision(kind="order_filled", message=order_msg, severity="success", payload=payload)
+                    results["orders_placed"].append(payload)
+
+                # Handle Stock Futures Scanner Mode
+                elif self.instrument_preference == "futures":
+                    fut_res = resolve_stock_future(symbol=sym, ltp=ltp, lots=1)
+                    stock_tgt_pct = float(self.exit_rules.get("target_pct", 10.0))
+                    stock_sl_pct = float(self.exit_rules.get("stop_loss_pct", 5.0))
+                    fut_tgt = round(ltp * (1.0 + stock_tgt_pct / 100.0), 2)
+                    fut_sl = round(ltp * (1.0 - stock_sl_pct / 100.0), 2)
+
+                    order_msg = (
+                        f"Placed BUY MIS for 1 lot ({fut_res.quantity} qty) of {fut_res.symbol} @ ₹{ltp:,.2f} "
+                        f"(Est. Margin: ₹{fut_res.estimated_margin_required:,.2f}). "
+                        f"Target: ₹{fut_tgt:,.2f} (+{stock_tgt_pct:.0f}%), SL: ₹{fut_sl:,.2f} (-{stock_sl_pct:.0f}%)."
+                    )
+                    payload = {
+                        "instrument": "futures",
+                        "contract_symbol": fut_res.symbol,
+                        "underlying": sym,
+                        "expiry": fut_res.expiry,
+                        "quantity": fut_res.quantity,
+                        "price": ltp,
+                        "invested": fut_res.estimated_margin_required,
+                        "target": fut_tgt,
+                        "stoploss": fut_sl,
+                    }
+                    self.log_decision(kind="order_filled", message=order_msg, severity="success", payload=payload)
+                    results["orders_placed"].append(payload)
+
+                # Handle Standard Cash Equity Mode
+                else:
+                    qty = max(1, int(self.capital_per_trade / ltp))
+                    invested = qty * ltp
+                    stock_tgt_pct = float(self.exit_rules.get("target_pct", 10.0))
+                    stock_sl_pct = float(self.exit_rules.get("stop_loss_pct", 5.0))
+                    tgt_price = round(ltp * (1.0 + stock_tgt_pct / 100.0), 2)
+                    sl_price = round(ltp * (1.0 - stock_sl_pct / 100.0), 2)
+
+                    order_msg = (
+                        f"Placed BUY {self.product_type} for {qty} shares of {sym} @ ₹{ltp:,.2f} "
+                        f"(Allocated: ₹{invested:,.2f}). Target: ₹{tgt_price:,.2f} (+{stock_tgt_pct:.0f}%), "
+                        f"SL: ₹{sl_price:,.2f} (-{stock_sl_pct:.0f}%)."
+                    )
+                    payload = {"instrument": "cash", "symbol": sym, "qty": qty, "price": ltp, "invested": invested, "target": tgt_price, "stoploss": sl_price}
+                    self.log_decision(kind="order_filled", message=order_msg, severity="success", payload=payload)
+                    results["orders_placed"].append(payload)
+
         else:
             self.log_decision(
                 kind="scan_completed",
@@ -120,6 +242,79 @@ class ScannerRunner:
             )
 
         return results
+
+    def evaluate_dual_exit(
+        self,
+        position: dict[str, Any],
+        current_option_price: float | None = None,
+        current_stock_price: float | None = None,
+        current_rsi: float | None = None,
+        current_supertrend: str | None = None,
+    ) -> dict[str, Any]:
+        """Evaluates whether an active options position should trigger an exit under Dual Exit Gates.
+
+        Gate A: Option Premium Target or Stop Loss.
+        Gate B: Underlying Stock Target, Stop Loss, RSI Overbought (>75), or Supertrend reversal.
+        """
+        sym = position.get("contract_symbol") or position.get("symbol", "POSITION")
+
+        # 1. Evaluate Gate A (Option Premium Target / Stop Loss)
+        if current_option_price is not None:
+            gate_a_tgt = position.get("gate_a_target")
+            gate_a_sl = position.get("gate_a_sl")
+            if gate_a_tgt and current_option_price >= gate_a_tgt:
+                return {
+                    "exit": True,
+                    "gate": "Gate A (Option Premium)",
+                    "reason": f"Option Premium Target hit: ₹{current_option_price:,.2f} >= ₹{gate_a_tgt:,.2f}",
+                    "current_price": current_option_price,
+                }
+            if gate_a_sl and current_option_price <= gate_a_sl:
+                return {
+                    "exit": True,
+                    "gate": "Gate A (Option Premium)",
+                    "reason": f"Option Premium Stop Loss hit: ₹{current_option_price:,.2f} <= ₹{gate_a_sl:,.2f}",
+                    "current_price": current_option_price,
+                }
+
+        # 2. Evaluate Gate B (Underlying Stock Price & Technical Indicators)
+        if current_stock_price is not None:
+            gate_b_tgt = position.get("gate_b_target")
+            gate_b_sl = position.get("gate_b_sl")
+            if gate_b_tgt and current_stock_price >= gate_b_tgt:
+                return {
+                    "exit": True,
+                    "gate": "Gate B (Underlying Stock)",
+                    "reason": f"Underlying Target Price reached: ₹{current_stock_price:,.2f} >= ₹{gate_b_tgt:,.2f}",
+                    "current_price": current_stock_price,
+                }
+            if gate_b_sl and current_stock_price <= gate_b_sl:
+                return {
+                    "exit": True,
+                    "gate": "Gate B (Underlying Stock)",
+                    "reason": f"Underlying Stop Loss breached: ₹{current_stock_price:,.2f} <= ₹{gate_b_sl:,.2f}",
+                    "current_price": current_stock_price,
+                }
+
+        if current_rsi is not None:
+            rsi_exit = position.get("rsi_exit", 75.0)
+            if current_rsi >= rsi_exit:
+                return {
+                    "exit": True,
+                    "gate": "Gate B (Technical Indicator)",
+                    "reason": f"RSI Overbought threshold reached: {current_rsi:.1f} >= {rsi_exit:.1f}",
+                    "current_rsi": current_rsi,
+                }
+
+        if current_supertrend is not None and current_supertrend.lower() == "bearish":
+            return {
+                "exit": True,
+                "gate": "Gate B (Technical Indicator)",
+                "reason": "Supertrend flipped to Bearish. Technical exit triggered.",
+                "current_supertrend": current_supertrend,
+            }
+
+        return {"exit": False, "gate": None, "reason": "Holding position within risk bounds"}
 
 
 def evaluate_scanner_strategy(strategy_id: int, user_id: str, mode: str = "sandbox", run_id: int | None = None) -> dict[str, Any]:

@@ -12,6 +12,12 @@ export interface AgentDraftCardProps {
     strategy_category?: string
     underlying?: string
     universe?: string
+    instrument_preference?: string
+    option_type?: string
+    strike_mode?: string
+    max_premium_per_trade_inr?: number
+    premium_target_pct?: number
+    premium_sl_pct?: number
     strategy_type?: string
     capital_inr?: number
     capital_per_trade_inr?: number
@@ -75,9 +81,20 @@ export function AgentDraftCard({ spec, className }: AgentDraftCardProps) {
 
         <div className="flex items-center gap-1.5">
           {spec.strategy_category === 'scanner' || spec.universe ? (
-            <span className="rounded-full bg-purple-500/10 px-2 py-0.5 text-[10px] font-medium text-purple-600 dark:text-purple-400">
-              {spec.universe || 'NIFTY 500'} Scanner
-            </span>
+            <>
+              <span className="rounded-full bg-purple-500/10 px-2 py-0.5 text-[10px] font-medium text-purple-600 dark:text-purple-400">
+                {spec.instrument_preference === 'options'
+                  ? `${spec.universe || 'F&O'} Options Scanner`
+                  : spec.instrument_preference === 'futures'
+                  ? `${spec.universe || 'F&O'} Futures Scanner`
+                  : `${spec.universe || 'NIFTY 500'} Scanner`}
+              </span>
+              {spec.instrument_preference === 'options' && (
+                <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                  Rollover Shield
+                </span>
+              )}
+            </>
           ) : (
             <span className="rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">
               {spec.underlying || 'NIFTY'} Options
@@ -106,8 +123,10 @@ export function AgentDraftCard({ spec, className }: AgentDraftCardProps) {
       <div className="py-2.5">
         <p className="font-mono text-xs text-muted-foreground">
           {spec.summary ||
-            (spec.strategy_category === 'scanner' || spec.universe
-              ? `${spec.universe || 'NIFTY 500'} Scanner | Max ${spec.max_concurrent_positions || 5} concurrent | ₹${spec.capital_per_trade_inr || 10000}/trade`
+            (spec.instrument_preference === 'options'
+              ? `${spec.universe || 'F&O'} Stock Options (${spec.option_type || 'CE'} ATM) | Max ₹${(spec.max_premium_per_trade_inr || 15000).toLocaleString('en-IN')}/trade | Max ${spec.max_concurrent_positions || 3} concurrent`
+              : spec.strategy_category === 'scanner' || spec.universe
+              ? `${spec.universe || 'NIFTY 500'} Scanner | Max ${spec.max_concurrent_positions || 5} concurrent | ₹${(spec.capital_per_trade_inr || 10000).toLocaleString('en-IN')}/trade`
               : `${spec.underlying || 'NIFTY'} current_weekly | ${spec.max_lots || 1} lot | SL: ₹${spec.stop_loss_inr} | TGT: ₹${spec.target_profit_inr}`)}
         </p>
       </div>
